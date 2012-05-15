@@ -1,0 +1,53 @@
+;===============================================================================
+;	ZFaT Specifications
+;	Low memory minimal Disk Allocation system
+;	--------------------
+;	Version 1.0
+;	
+;	Disk 1.44 = 1440 sectors of 512 words each (0x200)
+;	
+;	Disk layout :
+;	1 boot sector #0 ... Loader : directly loaded at 0 when machine boots, no 'next sector'
+;	1 fat sector #1 in RAM when currsector == 1
+;	DEQOS.SYS always start at sector #2 ! (SYS command ensures that)
+;	
+;	File layout in ZFat :
+;	Filename : 9 bytes in 4 words (including 3 extension)
+;	Filesize in 2 words (little endian)
+;	First sector 1 word
+;	Total : 7 words per file, 40 files max (420 words)
+;	1440 taken sector bit table : 90 words
+;	Disk name ??
+;	
+;	File layout :
+;	Read sector 1 into buffer, copy result 511 words, if size not reached, load next sector
+;	
+;	Emulator :
+;	Project settings :
+;	- Destination = disk image
+;	- System = asm file
+;	- app x = asm file
+;	- data file = any file
+;===============================================================================
+
+.def ZFAT_FATHeader_Size				184
+.def ZFAT_DiskName_Offset				0
+.def ZFAT_DiskName_Size					4	; 4 words = 9 characters
+.def ZFAT_UsedSectorTable_Offset		4
+.def ZFAT_UsedSectorTable_Size			180	; 1440 bits = 180 words
+
+.def ZFAT_FirstFileEntry_Offset			184	
+.def ZFAT_FileEntrySize					7
+.def ZFAT_MaxFileEntries				45	; to fit the whole FAT into a single sector
+
+.def ZFAT_FILEEntry_Name_Size			4	; 4 words = 9 characters
+.def ZFAT_FILEEntry_FileSize_Offset		4
+.def ZFAT_FILEEntry_FileSize_Size		2	; 2 words for file size
+.def ZFAT_FILEEntry_FirstSector_Offset	6	
+.def ZFAT_FILEEntry_FirstSector_Size	1	; 1 word = first sector for this file
+
+.def ZFAT_SectorBufferMemory		0x8300	;
+.def ZFAT_SectorBuffer_SystemSize	0x8301  ; when loading DEQOS.SYS, first word = system file size
+.def ZFAT_SectorSize				0x0200	; 512 words
+.def ZFAT_SectorBufferEnd			0x8500
+

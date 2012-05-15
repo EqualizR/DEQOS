@@ -1,0 +1,74 @@
+;-----------------------------------------------------------------------------------
+; This is the user code "DEQOS include file"
+; allowing you to perform system calls
+;-----------------------------------------------------------------------------------
+
+.def VIDEO_NB_COLUMNS			32
+.def VIDEO_NB_LINES				12
+.def SIGN_BIT					0x8000
+
+;-----------------------------------------------------------------------------------
+; Computed Constants
+; As ASM doesn't support regular expressions in constants (yet) ... 
+.def VIDEO_MEM_Size		  0x180
+.def VID_LastColumn		  31		; = VIDEO_NB_COLUMNS - 1
+.def VID_LastLine		  11		; = VIDEO_NB_LINES - 1
+;-----------------------------------------------------------------------------------
+
+;-------------------------------
+; System calls !!! (WIP)
+;-------------------------------
+
+.def SYS_KeyboardGet			0x0002	; returns key in Z, 0 if no key
+.def SYS_SetCurrColor			0x0003	; C = color (0xF200 for example)
+.def SYS_GetCurrColor			0x0004	; Z = color (0xF200 for example)
+.def SYS_NextLine				0x0005	
+.def SYS_ClearScreen			0x0006	; Uses CurrColor
+.def SYS_GetCursorX				0x0007	; Z = Cursor X
+.def SYS_GetCursorY				0x0008	; Z = Cursor Y
+.def SYS_SetCursorX				0x0009	; CursorX = A
+.def SYS_SetCursorY				0x000a	; CursorY = A
+.def SYS_DrawRect				0x000b	; X,Y = left top , A,B = Width Height
+.def SYS_ClipRect				0x000c	; X,Y = left top , A,B = Width Height, returs clipped in same regs
+.def SYS_PrintString			0x000d	; A = string ptr
+.def SYS_PrintStringNL			0x000e	; Same as PrintString + NextLine
+.def SYS_PrintValueHex			0x000f	; A = Value.. draws a 4 digit hexadecimal value
+.def SYS_PrintValueUnsigned		0x0010	; Draw A from 0 to 65535
+.def SYS_PrintValueSigned		0x0011	; Draw A from -32768...32767
+.def SYS_MEM_GetTotalFreeMem	0x0012	; Returns amount of free MEM in Z
+.def SYS_MEM_Alloc				0x0013	; A = requested size, returns pointer in Z (or 0 if can't)
+.def SYS_MEM_Free				0x0014	; A = Bloc to free
+.def SYS_ExecProgram			0x0015	; A = pointer to filename, returns when done
+.def SYS_RestoreCharacterTable  0x0016	; Restores default character table
+
+.def Push8						0x0017	; Pushes ABCIJXYZ
+.def Push7						0x0018	; Pushes ABCIJXY
+.def Push6						0x0019	; Pushes ABCIJX
+.def Push5						0x001A	; Pushes ABCIJ
+.def Push4						0x001B	; Pushes ABCI
+.def Push3						0x001C	; Pushes ABC
+.def Pop3						0x001D  ; Pops ABC and PC !
+.def Pop4						0x001E  ; Pops ABCI and PC !
+.def Pop5						0x001F  ; Pops ABCIJ and PC !
+.def Pop6						0x0020  ; Pops ABCIJX and PC !
+.def Pop7						0x0021  ; Pops ABCIJXY and PC !
+.def Pop8						0x0022  ; Pops ABCIJXYZ and PC !
+
+.def SYS_RevertColor			0x0023	; Reverts the current color 
+.def SYS_GetDisplayBuffer		0x0024	; Z = Video memory start
+.def SYS_GetFontBuffer			0x0025	; Z = Font memory start
+
+.def SYS_MutexCreate			0x0026  ; A = Initial Count (default = 1), returns Z = new Mutex
+.def SYS_MutexLock				0x0027	; A = Mutex
+.def SYS_MutexRelease			0x0028  ; A = Mutex
+
+.def SYS_Mul32By16				0x0029	; multiplies B:A with C result in Y:Z 
+.def SYS_Divide32By16			0x002A	; divides B:A with X result in Y:Z 
+
+.def SYS_GetTimeInSeconds		0x002B	; returns current time in seconds in Y:Z
+.def SYS_GetTimeInMilliseconds	0x002C	; returns current time in milliseconds in Y:Z
+.def SYS_Sleep					0x002D	; sleeps for (at least, since clock resolution is 16.66ms) 'A' milliseconds
+.def SYS_FinishLoop				0x002E	; sleeps until current time (in ms) minus B:A == C
+.def SYS_BlockWhenOutOfFocus	0x002F	; sleeps until the process' own console is activated
+.def SYS_BlockIfRunningInBackground 0x002F ; same as SYS_BlockWhenOutOfFocus
+

@@ -1,0 +1,448 @@
+
+:ZFAT_Mutex
+	dat 1
+:ZFAT_Mutex_ListCount
+	dat "00000000000000000"
+
+
+:ZFAT_Lock
+	SET PUSH,A
+	SET A, ZFAT_Mutex
+	JSR Mutex_Lock
+	SET A, POP
+	SET PC, POP
+
+:ZFAT_Unlock
+	SET PUSH,A
+	SET A, ZFAT_Mutex
+	JSR Mutex_Release
+	SET A, POP
+	SET PC, POP
+	
+;===================================
+; Loads the sector A into buffer 
+;===================================
+; returns Z = 0 (ok), 1 (not ok)
+;===================================
+:ZFAT_LoadSector
+
+;:ZF_WaitDiskReady
+;	IFE [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Idle		SET PC,	ZF_StartLoading
+;	IFE [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Error		SET PC,	ZF_StartLoading
+;	SET PC,	ZF_WaitDiskReady
+	
+;:ZF_StartLoading
+;	SET [ZFAT_DISK_LOAD_COMMAND_WORD], A
+;	SET [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Load_Request
+	
+;:ZF_WaitLoadingDone
+;	IFE [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Idle	SET PC, ZF_LoadSectorDone
+;	IFE [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Error	SET PC, ZF_LoadSectorDone
+;	SET PC,	ZF_WaitLoadingDone
+
+		SET PUSH, A
+		SET PUSH, B
+		SET PUSH, C
+		SET PUSH, X
+		SET B, A
+		SET C, 1
+		SET A, 0x10 
+		SET X, ZFAT_SectorBufferMemory
+		HWI [DISKDRIVE_ID]
+		SET X, POP
+		SET C, POP
+		SET B, POP
+		SET A, POP	
+	
+:ZF_LoadSectorDone
+	SET Z, 0 ; [ZFAT_DISK_LOAD_STATUS]
+	
+	SET [ZFAT_bFATIsInMem], 0
+	IFE A, 1				SET [ZFAT_bFATIsInMem], 1
+	
+	SET PC, POP
+	
+:ZFAT_bFATIsInMem
+	dat 0
+	
+;===================================
+; Loads the FAT
+;===================================
+:ZFAT_LoadFAT
+	IFE [ZFAT_bFATIsInMem], 1
+		SET PC, POP
+	SET PUSH, A
+	SET A, 1
+	JSR ZFAT_LoadSector
+	SET A, POP
+	SET PC, POP
+	
+:ZFAT_FileNameBuffer
+	dat "0123456789", 0
+:ZFAT_FileNameBuffer2
+	dat "0123456789", 0
+	
+;===================================
+; ZFAT_DecodePackedString
+; (ZFAT Filenames are packed 9 chars -> 4 words)
+;--------------
+; Input : A = Pointer to the 4 words
+;         B = Empty string (10 char buffer)
+;===================================
+:ZFAT_DecodePackedString
+	JSR PushAllRegs8
+	SET X, [A]
+	SET Y, [1+A]
+	SET Z, [2+A]
+	SET I, [3+A]
+	; Should really use the O register trick.... anyway.. will do that later
+	; ( (uw0 >> 9) & 0x7f);
+	SET J, X	SHR J, 9	AND J, 0x7f		SET [B], J		ADD B,1
+	; ( (uw0 >> 2) & 0x7f);
+	SET J, X	SHR J, 2	AND J, 0x7f		SET [B], J		ADD B,1
+	; ( ((uw0 << 5) | (uw1 >> 11)) & 0x7f);
+	SHL X, 5	SET J, Y	SHR J, 11		BOR J, X		AND J, 0x7f		SET [B], J		ADD B,1
+	; ((uw1 >> 4) & 0x7f);
+	SET J, Y	SHR J, 4	AND J, 0x7f		SET [B], J		ADD B,1
+	; (((uw1 << 3) | (uw2 >> 13)) & 0x7f);
+	SHL Y, 3	SET J, Z	SHR J, 13		BOR J, Y		AND J, 0x7f		SET [B], J		ADD B,1
+	; ((uw2 >> 6) & 0x7f);
+	SET J, Z	SHR J, 6	AND J, 0x7f		SET [B], J		ADD B,1
+	; (((uw2 << 1) | (uw3 >> 15)) & 0x7f);
+	SHL Z, 1	SET J, I	SHR J, 15		BOR J, Z		AND J, 0x7f		SET [B], J		ADD B,1
+	; ((uw3 >> 8) & 0x7f);
+	SET J, I	SHR J, 8	AND J, 0x7f		SET [B], J		ADD B,1
+	; ((uw3 >> 1) & 0x7f);
+	SET J, I	SHR J, 1	AND J, 0x7f		SET [B], J		ADD B,1
+	SET [B], 0		; Terminate the string
+	SET PC, PopRet8
+	
+;===============================
+; Returns the volume name in A
+;===============================
+:ZFAT_GetVolumeName
+	JSR ZFAT_Lock
+	
+	JSR ZFAT_LoadFAT	; Ensure FAT is here
+	SET B, ZFAT_FileNameBuffer
+	SET A, ZFAT_SectorBufferMemory	; FAT Header
+	JSR ZFAT_DecodePackedString
+	SET A, ZFAT_FileNameBuffer
+	
+	JSR ZFAT_Unlock
+	SET PC, POP
+	
+;===================================
+; returns the number of files in Z
+;===================================
+:ZFAT_CountFiles
+	JSR ZFAT_Lock
+	
+	SET PUSH, A
+	JSR ZFAT_LoadFAT	; Ensure FAT is here
+	SET Z, 0
+	SET A, ZFAT_SectorBufferMemory
+	ADD A, ZFAT_FirstFileEntry_Offset
+	ADD A, ZFAT_FILEEntry_FirstSector_Offset
+	
+:ZFAT_CountFilesLoop
+	IFE [A], 0			SET PC, ZFAT_CountFiles_End
+	ADD Z, 1
+	ADD A, ZFAT_FileEntrySize
+	SET PC, ZFAT_CountFilesLoop
+	
+:ZFAT_CountFiles_End
+	SET A, POP
+	
+	JSR ZFAT_Unlock
+	SET PC, POP
+
+;===================================
+; returns the filename
+;===================================
+:ZFAT_GetFileNameNoLock
+	SET PUSH, B
+	JSR ZFAT_LoadFAT	; Ensure FAT is here
+	MUL A, ZFAT_FileEntrySize
+	ADD A, ZFAT_SectorBufferMemory
+	ADD A, ZFAT_FirstFileEntry_Offset
+	
+    SET B, ZFAT_FileNameBuffer
+	JSR ZFAT_DecodePackedString
+	SET A, ZFAT_FileNameBuffer
+	SET B, POP
+	
+	SET PC, POP	
+
+	
+:ZFAT_GetFileName
+	JSR ZFAT_Lock
+	
+	JSR ZFAT_GetFileNameNoLock
+	
+	JSR ZFAT_Unlock
+	SET PC, POP	
+	
+:ZFAT_GetFileSize
+	JSR ZFAT_Lock
+	
+	SET PUSH, B
+	JSR ZFAT_LoadFAT	; Ensure FAT is here
+	MUL A, ZFAT_FileEntrySize
+	ADD A, ZFAT_SectorBufferMemory
+	ADD A, ZFAT_FirstFileEntry_Offset
+	ADD A, ZFAT_FILEEntry_FileSize_Offset
+    SET A, [A]
+	SET B, POP
+	
+	JSR ZFAT_Unlock
+	SET PC, POP	
+
+;==================================
+; Takes a display filename
+; ex : "TOTO.PRG" and expands it
+; to "TOTO  PRG" filename	
+; A = source string
+; B = dest string
+;==================================
+:ZFAT_ExpandFileName
+	JSR PushAllRegs8
+	
+	SET [10+a],0 ; force terminate the string.. 
+	
+	; filling string with spaces
+	SET J, B
+	SET I, B
+	ADD J, 9
+:zfat_exp1
+	SET [I], 32	; ascii for ' '
+	ADD I, 1
+	IFN I,J    SET PC, zfat_exp1
+	SET [I], 0
+	
+	SET I, B
+	
+:ZFAT_EXP_Loop1
+	SET J,[A]
+	ADD A,1
+	IFE J,0		 SET PC, ZFAT_Exp_done
+	IFE J,0x2E	 SET PC, ZFAT_exp_Extens; ascii for '.'
+	SET [I], J
+	ADD I, 1
+	SET PC, ZFAT_EXP_Loop1
+	
+:ZFAT_exp_Extens
+	SET I,B
+	ADD I,6
+	SET Z, I
+	ADD Z, 3
+:ZFAT_exp_ExtensLoop2
+	SET J,[A]
+	ADD A,1
+	IFE J,0		 SET PC, ZFAT_Exp_done
+	SET [I], J
+	ADD I, 1
+	IFE I, Z	 SET PC, ZFAT_Exp_done
+	SET PC, ZFAT_exp_ExtensLoop2
+	
+:ZFAT_Exp_done
+	SET PC, PopRet8
+	
+	
+;=======================================
+; A = FileName (not in ZFAT_FileNameBuffer)
+; return Z = FileIndex or 0xFFFF
+;=======================================
+:ZFAT_FindFileByName
+	JSR PushAllRegs7
+	
+	JSR ZFAT_CountFiles
+	
+	JSR ZFAT_Lock
+	JSR ZFAT_LoadFAT	; Ensure FAT is here
+	
+	SET X, Z	; x = file count
+	SET B, A	; B = filename to compare to
+	
+	SET I,0
+:ZFAT_FindFileLoop
+	IFE I, X	SET PC, ZFAT_FindFileByNameNotFound
+	SET A, I
+	JSR ZFAT_GetFileNameNoLock
+	SET C, ZFAT_FindFileByNameFound
+	JSR CompareCommand
+	; IFE Z, 1		SET PC, ZFAT_FindFileByNameFound
+	ADD I,1
+	SET PC, ZFAT_FindFileLoop
+:ZFAT_FindFileByNameNotFound
+	SET Z, 0xFFFF
+	JSR ZFAT_Unlock
+	SET PC, PopRet7
+	
+:ZFAT_FindFileByNameFound
+	SET Z, I
+	JSR ZFAT_Unlock
+	SET PC, PopRet7
+
+:ZFAT_Var_SizeToLoad
+	dat 0
+:ZFAT_Var_NextSector
+	dat 0
+:ZFAT_CurrentDestPointer
+	dat 0
+		
+;=======================================
+; ZFAT_LoadFile
+;=======================================
+;	A = Sector to load first
+;	B = Destination pointer
+;	C = Size To Load
+;;=======================================
+	
+:ZFAT_LoadFile
+	JSR PushAllRegs8
+	JSR ZFAT_Lock
+	
+	SET [ZFAT_Var_SizeToLoad], C
+	SET [ZFAT_CurrentDestPointer], B	; destination address
+	
+	JSR ZFAT_LoadSector	; Loads first sector
+	
+	SET [ZFAT_Var_NextSector], [ZFAT_SectorBufferMemory]
+	
+	; Preparing the TempDiskBuffer -> Final destination copy
+	SET A, ZFAT_SectorBufferMemory		; Source
+	ADD A, 1							; skipping first 2 words
+	SET B, 511							; 510 words to copy (will be 511 for the next sectors)
+	
+:ZFAT_CopySector	; copies from Sector temp buffer to actual destination
+					; size to copy is in B
+	IFG B, [ZFAT_Var_SizeToLoad]	SET B, [ZFAT_Var_SizeToLoad]
+	
+	SET PUSH, B
+	SET C, [ZFAT_CurrentDestPointer]
+	ADD B, C
+	
+	; Copy loop (unoptimized yet)
+:ZFAT_GoCopy
+	SET [C], [A]
+	ADD C,1
+	ADD A,1
+	IFN B,C		SET PC, ZFAT_GoCopy
+	SET [ZFAT_CurrentDestPointer], C
+	
+	SET B, POP
+	SUB [ZFAT_Var_SizeToLoad], B
+	
+	; nothing to load anymore ?
+	IFE [ZFAT_Var_SizeToLoad], 0	SET PC, ZFAT_LoadFileDone
+	
+	; Loading next sector
+	SET A, [ZFAT_Var_NextSector]
+	JSR ZFAT_LoadSector
+	
+	SET [ZFAT_Var_NextSector], [ZFAT_SectorBufferMemory]
+	SET A, ZFAT_SectorBufferMemory
+	ADD A, 1						; skipping first word
+	SET B, 511						; 511 words to copy
+	SET PC, ZFAT_CopySector
+	
+:ZFAT_LoadFileDone
+
+	JSR ZFAT_Unlock
+	SET PC, PopRet8
+	
+;=======================================
+; ZFAT_LoadAndRun
+; A = File Index
+;=======================================
+:ZFAT_LoadAndRun
+	JSR PushAllRegs8
+	JSR ZFAT_Lock
+	
+	JSR ZFAT_LoadFAT	; Ensure FAT is here
+
+	MUL A, ZFAT_FileEntrySize
+	ADD A, ZFAT_SectorBufferMemory
+	ADD A, ZFAT_FirstFileEntry_Offset
+	SET X, A			; X = File header
+	ADD A, ZFAT_FILEEntry_FileSize_Offset
+    SET A, [A]	 ; A = File Size
+    SET C, A
+    
+    JSR ZFAT_Unlock
+    
+    ; Must Allocate memory
+    JSR MEM_Alloc
+    IFE Z, 0	SET PC, DispNotEnoughMemory
+	
+	JSR ZFAT_Lock
+	JSR ZFAT_LoadFAT
+	
+	SET A, X
+	ADD A, ZFAT_FILEEntry_FirstSector_Offset	
+	SET A, [A]									; A = Sector to load
+	SET B, Z									; B = Where to load
+												; C = size to load
+												
+	JSR ZFAT_Unlock
+	JSR ZFAT_LoadFile
+	
+	; Now, must remap
+	SET X, B	; destination pointer
+	ADD X, C	; End
+	SUB X, 1
+	
+:ZFAT_LoadAndRunRemapLoop
+	SET A, [X]
+	IFE A, 0xFFFF	SET PC, ZFAT_LoadAndRun_Launch
+	ADD A,   B		; Address of the address to remap
+	ADD [A], B
+	SUB X, 1
+	SET PC, ZFAT_LoadAndRunRemapLoop
+	
+:ZFAT_LoadAndRun_Launch
+	SET A,7
+	JSR DEQOS_SetThreadPriority
+	SET PUSH, B
+	JSR B
+	JSR [SYS_RestoreCharacterTable]
+	SET B, POP
+	SET A, B
+	JSR MEM_Free
+	
+	SET A,8
+	JSR DEQOS_SetThreadPriority
+	SET PC, PopRet8
+	
+:STR_NotEnoughMem
+	dat "Not enought memory",0
+
+:DispNotEnoughMemory
+	SET A, STR_NotEnoughMem
+	JSR PrintStringNL
+	SET PC, PopRet8
+
+;===============================
+; Execs a program whose name
+; is in 'A'
+;===============================
+:ZFAT_ExecProgram
+	JSR PushAllRegs7
+	SET B, ZFAT_FileNameBuffer2
+	JSR ZFAT_ExpandFileName
+  
+	SET A, ZFAT_FileNameBuffer2
+	JSR ZFAT_FindFileByName
+  
+	IFE Z,0xffff	SET PC, ZFAT_FileNotFound
+  
+	SET A,Z
+	JSR ZFAT_LoadAndRun
+	
+	SET Z, 1
+	SET PC, PopRet7
+  
+:ZFAT_FileNotFound
+	SET Z, 0
+	SET PC, PopRet7

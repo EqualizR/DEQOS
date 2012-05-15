@@ -1,0 +1,268 @@
+;=============================================================
+; DCPU16 std library
+;=============================================================
+
+
+;==================================
+; strcpy A<-B
+;==================================
+.strip_start
+
+:strcpy
+	JSR [Push5]
+	SET I, A
+	SET J, B
+	:strcpy_loop
+		STI [I], [J]
+		IFN [J], 0
+			SET PC, strcpy_loop
+	SET [I], 0
+	SET PC, [Pop5]
+
+.strip_end	
+
+;==================================
+; strcmp Z = (A == B)
+;==================================
+.strip_start
+
+:strcmp
+	JSR [Push3]
+	SET Z, 0
+	:strcmp_loop
+		IFN [A], [B]
+			SET PC, [Pop3]
+		IFE [B], 0
+			SET PC, strcmp_success
+		ADD B, 1
+		ADD A, 1
+		SET PC, strcmp_loop
+	:strcmp_success
+		SET Z, 1
+		SET PC, [Pop3]
+.strip_end
+
+;==================================
+; strlen Z = len(A)
+;==================================
+.strip_start
+
+:strlen
+	JSR [Push3]
+	SET B,A
+	SUB A,1
+	:strlen_loop
+		ADD A, 1
+		IFN 0, [A]	
+			SET PC, strlen_loop
+	SET Z, A
+	SUB Z, B
+	SET PC, [Pop3]
+	
+.strip_end
+
+;==================================
+; strstr Z = Occurence of B in string A
+;==================================
+.strip_start
+
+:strstr
+	JSR [Push3]
+	
+	:strstrloop
+		JSR substrstr
+		IFE Z,1
+			SET PC, strstr_found
+		ADD A,1
+		IFE [A], 0
+			SET PC, strstr_notfount
+		SET PC, strstrloop
+	:strstr_found
+		SET Z,A
+		SET PC, [Pop3]
+	:strstr_notfount
+		SET Z,0
+		SET PC, [Pop3]
+
+	; sub fonction
+	:substrstr
+		SET PUSH, A
+		SET PUSH, B
+		SET Z, 0
+		
+		:substrstrloop
+			IFE [B], 0
+				SET PC, substrstrcheck
+			IFN [B], [A]
+				SET PC, substrstrfail
+			ADD B,1
+			ADD A,1
+			SET PC, substrstrloop
+			
+		:substrstrcheck
+			SET Z, 1
+		:substrstrfail
+			SET B, POP
+			SET A, POP
+			SET PC, POP
+		
+.strip_end
+
+;==================================
+; memcpy A<-B , C = size
+; (slow 7 cycles per word)
+; 26.88ms to copy screen
+;==================================
+.strip_start
+
+:memcpy
+	JSR [Push5]
+	SET I, A
+	SET J, B
+	ADD C, A	; end for A
+	:memcpy_loop
+		STI [I], [J]
+		IFN I, C
+			SET PC, memcpy_loop
+	SET PC, [Pop5]
+	
+.strip_end
+
+;==================================
+; memcpy8 A<-B , C = size
+; !! SIZE Must be Multiple of 8 !!
+;   (2.625 cycles per word)
+;	10 ms to copy screen
+;==================================
+.strip_start
+
+:memcpy8
+	JSR [Push5]
+	SET I, A
+	SET J, B
+	ADD C, A	; end for A
+	:memcpy8_loop
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		IFN I, C
+			SET PC, memcpy8_loop
+	SET PC, [Pop5]
+	
+.strip_end
+
+
+;==================================
+; memcpy16 A<-B , C = size
+; !! SIZE Must be Multiple of 16 !!
+;   (2.31 cycles per word)
+;   8.8 ms to copy screen
+;==================================
+.strip_start
+
+:memcpy16
+	JSR [Push5]
+	SET I, A
+	SET J, B
+	ADD C, A	; end for A
+	:memcpy16_loop
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		IFN I, C
+			SET PC, memcpy16_loop
+	SET PC, [Pop5]
+	
+.strip_end
+
+
+
+;==================================
+; memset A = dest, B = word , C = size
+;     (slow 5 cycles per word)
+;       19.2ms to fill screen
+;==================================
+.strip_start
+
+:memset
+	JSR [Push3]
+	ADD C, A	; end for A
+	:memset_loop
+		SET [A], B
+		ADD A,1
+		IFN A, C
+			SET PC, memset_loop
+	SET PC, [Pop3]
+	
+.strip_end
+
+
+;==================================
+; Add32 C = A + B where A,B & C
+; are pointers to 32bits
+; (little endian)
+;==================================
+.strip_start
+
+:add32
+	SET [C], [A]
+	ADD [C], [B]
+	SET [1+C], EX
+	ADD [1+C],[1+A]
+	ADD [1+C],[1+B]
+	SET PC, POP
+
+.strip_end	
+
+;==================================
+; Sub32 C = A - B where A,B & C
+; are pointers to 32bits
+; (little endian)
+;==================================
+.strip_start
+
+:sub32
+	SET [C], [A]
+	SUB [C], [B]
+	SET [1+C], EX
+	ADD [1+C],[1+A]
+	SUB [1+C],[1+B]
+	SET PC, POP
+
+.strip_end	
+
+
+;==================================
+; Mul32 C = A * B where A,B & C
+; are pointers to 32bits
+; (little endian)
+;==================================
+.strip_start
+
+:mul32
+	SET [C], [A]
+	SUB [C], [B]
+	SET [1+C], EX
+	ADD [1+C],[1+A]
+	SUB [1+C],[1+B]
+	SET PC, POP
+
+.strip_end	

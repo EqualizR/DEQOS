@@ -1,0 +1,256 @@
+;====================================================================
+; This is the boot sector loader code
+; Basically, it copies itself at 0xF000
+; then it executes there, loading the DEQOS.SYS file at 0x0000
+; then launch it... 
+;====================================================================
+
+.include "DEQOS_ZFat.h16"
+
+.out "LOADER.SYS"
+.no_relocation_table	; this loader is loaded at 0x0000, so no relocation
+
+; local variables
+.def ZFAT_BootTempVar_SizeToLoad	0xf500
+.def ZFAT_BootTempVar_NextSector	0xf501
+.def ZFAT_CurrentDestPointer		0xf502
+.def ZFAT_BootCursor				0xf503
+.def DiskHWIndex					0xf504
+
+
+.def ZFAT_LoaderRelocationAddress	0xF000
+
+.def NELEM1802_ID_Lo	0xf615
+.def NELEM1802_ID_Hi	0x7349
+.def NELEM1802_Rev_MinusOne		0x1801 ; 1802 minus one (for IFG)... 
+.def NELEM1802_Manu_Lo	0x8b36
+.def NELEM1802_Manu_Hi  0x1c6c
+.def NELEM1802_MEM_MAP_SCREEN			0
+.def NELEM1802_MEM_MAP_FONT				1
+.def NELEM1802_MEM_MAP_PALETTE			2
+.def NELEM1802_MEM_SET_BORDER_COLOR		3
+
+; ID: 0x74fa4cae, version: 0x07c2
+; Manufacturer: 0x21544948 (HAROLD_IT)
+.def HITHMD2043_ID_Lo			0x4cae
+.def HITHMD2043_ID_Hi			0x74fa
+.def HITHMD2043_Rev_MinusOne	0x07c1
+.def HITHMD2043_Manu_Lo			0x4948
+.def HITHMD2043_Manu_Hi			0x2154
+
+:ZFAT_BOOT	
+
+	; Finds the screen
+	HWN J									; gets number of HW Devices
+	IFE J, 0	SET PC, ScreenDetectEnd
+	SET I, 0
+	
+:ScreenDetectLoop
+	HWQ I									; gets info from HW
+	
+	IFE A, NELEM1802_ID_Lo
+			IFE B, NELEM1802_ID_Hi
+			IFE X, NELEM1802_Manu_Lo
+			IFE Y, NELEM1802_Manu_Hi
+			ADD PC, 3 ; SET PC, ScreenDetectFound
+	ADD I, 1
+	IFN I, J
+		SUB PC, 13   ; SET PC, ScreenDetectLoop
+	
+	; didn't find it.. 
+	; SET PC, ScreenDetectEnd
+	
+:ScreenDetectFound
+	SET A, NELEM1802_MEM_MAP_SCREEN
+	SET B, 0x8000 ; Setting default screen buffer
+	HWI I
+
+:ScreenDetectEnd
+	
+	;---------------------------------
+	; Draws the "Loading OS" string
+	;---------------------------------
+	SET A, STR_Loading
+	SET I, B			; screen buffer
+	
+	:ZFAT_DrawLoading
+		SET C, [A]
+		IFE C, 0
+			ADD PC, 4   ;SET PC, EndDrawLoading
+		ADD A, 1
+		BOR C, B		; 0x8000 ; Gray over black
+		STI [I], C
+		SUB PC, 7 		;SET PC, ZFAT_DrawLoading
+	
+	:EndDrawLoading
+	
+	SET	[ZFAT_BootCursor], I	; Saves the cursor
+	
+	;---------------------------------
+	; Moves the boot code to 0xF000
+	;---------------------------------
+	
+	SET I, ZFAT_BOOT					; Source
+	SET J, ZFAT_LoaderRelocationAddress	; Destination
+	
+	SET B, ZFAT_END_BOOT
+	SUB B, I						; B = total size of code to move
+	SET C, ZFAT_LoadSystemFile
+	SUB C, I						; C = offset of the ZFAT_LoadSystemFile function from 0
+	ADD C, J						; C = Address of ZFAT_LoadSystemFile when the relocation is done
+	ADD B, J						; Destination end
+	
+	:ZFAT_Relocate
+		STI [J],[I]
+		IFN  B,J		
+			SUB PC, 3 ; SET PC, ZFAT_Relocate
+	
+	; Code has been relocated, we call 0xf000 + offset of ZFAT_LoadSystemFile
+	SET PC, C
+	
+:STR_Loading
+	dat "Loading",0
+	
+
+
+;**********************************************************
+; !!! Relocated code !!!
+;**********************************************************
+
+;
+; Tells the assembler to add 0xF000 to every resolved symbol
+; in this code region
+;
+.org ZFAT_LoaderRelocationAddress	
+
+	;===================================
+	; Loads the system file into 0x0000
+	;===================================
+	:ZFAT_LoadSystemFile
+	
+		; search for disk hw
+		HWN J									; gets number of HW Devices
+		IFE J, 0	SET PC, DiskDetectEnd
+		SET I, 0
+		:DiskDetectLoop
+			HWQ I									; gets info from HW
+			
+			IFE A, HITHMD2043_ID_Lo
+				IFE B, HITHMD2043_ID_Hi
+				; IFG C, HITHMD2043_Rev_MinusOne
+				IFE X, HITHMD2043_Manu_Lo
+				IFE Y, HITHMD2043_Manu_Hi
+				SET [DiskHWIndex], I
+			ADD I, 1
+			IFN I, J
+				SUB PC,14 ; SET PC, DiskDetectLoop
+			
+	:DiskDetectEnd		
+		SET A,2 ; First Sector to load (0 = boot, 1 = FAT, 2 = DEQOS.SYS)
+		JSR ZFAT_LoadSector
+		
+		;
+		; DEQOS.SYS starts with 2 words : the next sector, and the total file size
+		;
+		SET [ZFAT_BootTempVar_NextSector], [ZFAT_SectorBufferMemory]
+		SET [ZFAT_BootTempVar_SizeToLoad], [ZFAT_SectorBuffer_SystemSize]
+		
+		
+		; Preparing the TempDiskBuffer -> Final destination copy
+		
+		SET [ZFAT_CurrentDestPointer], 0	; destination address
+		SET A, ZFAT_SectorBufferMemory		; Source
+		ADD A, 2							; skipping first 2 words
+		SET B, 510							; 510 words to copy (will be 511 for the next sectors)
+		
+	:ZFAT_CopySector	; copies from Sector temp buffer to actual destination
+						; size to copy is in B
+		IFG B, [ZFAT_BootTempVar_SizeToLoad]	
+			SET B, [ZFAT_BootTempVar_SizeToLoad]
+		
+		SET Y, B
+		;SET PUSH, I
+		;SET PUSH, J
+		SET C, [ZFAT_CurrentDestPointer]
+		ADD B, C
+		
+		SET I, A
+		SET J, C
+		
+		; Copy loop (unoptimized yet)
+		:ZFAT_GoCopy
+			STI [J], [I]
+			IFN J,B		
+				SUB PC, 3 	; SET PC, ZFAT_GoCopy
+		
+		SET [ZFAT_CurrentDestPointer], J
+		
+		;SET J, POP
+		;SET I, POP
+		;SET B, POP
+		SUB [ZFAT_BootTempVar_SizeToLoad], Y
+		
+		; nothing to load anymore ?
+		IFE [ZFAT_BootTempVar_SizeToLoad], 0	
+			SET PC, ZFAT_GO_BOOT
+		
+		; Loading next sector
+		SET A, [ZFAT_BootTempVar_NextSector]
+		JSR ZFAT_LoadSector
+		
+		SET [ZFAT_BootTempVar_NextSector], [ZFAT_SectorBufferMemory]
+		SET A, ZFAT_SectorBufferMemory
+		ADD A, 1						; skipping first word
+		SET B, 511						; 511 words to copy
+		SET PC, ZFAT_CopySector
+		
+	;===================================
+	; Loads the sector A into buffer 
+	;===================================
+	; returns Z = 0 (ok), 1 (not ok)
+	;===================================
+	:ZFAT_LoadSector
+		SET PUSH, B
+		SET PUSH, C
+		;SET PUSH, X
+		
+		SET B, A
+		SET C, 1
+		SET A, 0x10 
+		SET X, ZFAT_SectorBufferMemory
+		HWI [DiskHWIndex]
+		
+				
+		; Displays a '.' after each loaded sector
+		
+		SET B, [ZFAT_BootCursor]
+		SET [B], 0x802e			; '.' 
+		ADD [ZFAT_BootCursor], 1
+		
+		;SET X, POP
+		SET C, POP
+		SET B, POP
+		
+		; SET Z, 0 ; [ZFAT_DISK_LOAD_STATUS]
+		SET PC, POP
+		
+	:ZFAT_GO_BOOT
+		; System is supposed to boot with every register set to 0... 
+		SET A,0
+		SET B,0
+		SET C,0
+		SET X,0
+		SET Y,0
+		SET Z,0
+		SET I,0
+		SET J,0
+		SET EX,0
+		SET SP,0
+		SET PC,0	; jumps to boot !!!
+		
+	:ZFAT_END_BOOT
+		;dat 0
+	
+.end_org
+
+

@@ -1,0 +1,608 @@
+;=======================================================
+; SHELL for DEQOS
+;=======================================================
+
+.def CycleCount 1
+.def InputString 2
+.def InputStringIndex 34
+;.def CommandWord 35
+;.def CommandWordIndex	67
+:CommandWord
+	dat 0,"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",0
+:CommandWordIndex
+	dat 0
+
+;===================================
+;         CompareCommand
+;===================================
+; A = Reference String
+; B = String to compare to
+; C = Address to jump to if success
+; Z = 1 if exact match
+;===================================
+:CompareCommand
+  SET PUSH, A
+  SET PUSH, B
+  SET Z, 0 
+:CompareCommandL1
+  IFN [A],[B]	SET PC, CompareCommandWrong
+  IFE [A],0		SET PC, CompareCommandOK
+  ADD A,1
+  ADD B,1
+  SET PC, CompareCommandL1
+:CompareCommandOK
+  SET B, POP
+  SET A, POP
+  SET Z, POP
+  SET PC, C
+:CompareCommandWrong
+  SET B, POP
+  SET A, POP
+  SET PC, POP
+;===================================
+
+
+:ShellLoopEmpty
+	SET A, 20
+	JSR Sleep
+	JSR DEQOS_BlockIfNotOnMyConsole
+	SET PC,ShellLoop
+	
+;===================================
+;  SHELL !!
+;===================================
+; This is where the user enters
+; commands
+;===================================
+:Shell
+   SUB SP, 68
+:ShellStart
+   SET PICK CycleCount, 0	; loop counter
+						; to make cursor blink
+   JSR DrawPrompt		; Draws the 'Ready>'
+
+   SET PICK InputStringIndex, 0 ; Init the input string
+   SET PICK InputString,0
+   
+   JSR DrawCursor
+
+:ShellLoop
+  	;SET PUSH, A
+  	;SET PUSH, B
+  	;SET PUSH, X
+  	;SET PUSH, Y
+  	;SET PUSH, Z
+	;SET PUSH, [Cursor_X]
+	;SET PUSH, [Cursor_Y]
+	;SET [Cursor_X], 28
+	;SET [Cursor_Y], 11
+	;JSR GetTimeInSeconds
+	;SET A, Z
+	;JSR PrintValueHex
+	;SET [Cursor_Y], POP
+	;SET [Cursor_X], POP
+	;SET Z, POP
+	;SET Y, POP
+	;SET X, POP
+	;SET B, POP
+	;SET A, POP
+
+   ; Reading input from keyboard
+   JSR [SYS_KeyboardGet]
+   IFE Z,0						SET PC, ShellLoopEmpty
+   IFE Z, ASCIICode_Return		SET PC, PI_Enter
+   IFE Z, ASCIICode_Backspace	SET PC, PI_Delete
+    
+   ; commands do not overflow
+   ; the screen width
+   IFE [Cursor_X],VID_LastColumn	SET PC, ShellInputContinue
+     
+   ; reject anything before 'space'
+   IFG ASCIICode_Space, Z		SET PC, ShellInputContinue
+     
+   ; transform lowercase into
+   ; uppercase
+   IFG Z, ASCIICode_Lower_z			SET PC, PI_NotLowerCase
+   IFG ASCIICode_Lower_a, Z			SET PC, PI_NotLowerCase
+    
+   ; lowercase->upper
+   SUB Z, 32
+
+:PI_NotLowerCase
+   ; storing char
+   SET A, InputString
+   ADD A, SP
+   ADD A, PICK InputStringIndex
+   SET [A], Z
+   SET [1+A],0 ; zero-terminate the string
+   ADD PICK InputStringIndex, 1 ; string length++
+   SET PC, ShellInputContinue
+
+:PI_Delete
+   JSR EraseCursor
+   IFE PICK InputStringIndex, 0		SET PC,ShellInputContinue
+   SET A, PICK InputStringIndex
+   ADD A, InputString
+   ADD A, SP
+   SET [A],0
+   SUB A, 1
+   SET [A],0 ; [A-1] = 0
+   SUB PICK InputStringIndex, 1
+   SUB [Cursor_X],1
+   JSR EraseCursor	; wipe deleted char
+   SET PC, ShellInputContinue
+
+:PI_Enter
+   JSR [SYS_NextLine]
+   SET [DecodeSource], InputString
+   ADD [DecodeSource], SP
+   SET PUSH, RunCommand
+   SET PC, DecodeCommand
+   
+
+:ShellInputContinue
+   SET [Cursor_X],0	; We re-draw
+   JSR DrawPrompt   ; Ready>
+   SET A, InputString ; Command
+   ADD A, SP
+   
+   JSR PrintString
+   SET PUSH,ShellLoop
+   SET PC, DrawCursor
+   
+
+;===================================
+;          DecodeCommand
+;===================================
+; Extracts the command from InputString
+; Puts the first word into
+; CommandWord for parsing and exec
+;===================================
+:DecodeSource
+   dat 0
+:DecodeCommand
+   ; A = InputString
+   SET A, [DecodeSource]
+   SET B, CommandWord
+   SET [B], 0
+   SET [CommandWordIndex], 0
+:DecodeL1
+   SET X, [A]
+   ADD A, 1
+   
+   IFE X, 0					SET PC, DecodeDone
+   IFE X, ASCIICode_Space	SET PC, DecodeSpace
+    
+   SET [B], X ; else, we copy
+   SET [1+B], 0
+   ADD [CommandWordIndex], 1
+   ADD B,1
+   SET PC, DecodeL1
+   
+:DecodeSpace
+	; Leading space ?
+   IFE [CommandWordIndex],0		SET PC, DecodeL1 ; we simply ignore it
+   ; SET PC, DecodeDone ; else, we've finished
+   
+:DecodeDone
+   SET [DecodeSource], A
+   SET PC, POP
+
+;===================================
+
+:CM_CLS
+  dat "CLS",0
+:CM_DIR
+  dat "DIR",0
+:CM_MEM
+  dat "MEM",0
+:CM_TEST
+  dat "TEST",0
+:CM_SHOWMEM
+  dat "SHOWMEM",0
+:CM_SETCOLOR
+  dat "SETCOLOR",0
+:CM_ABOUT
+  dat "ABOUT",0
+:CM_FORMAT
+  dat "FORMAT",0
+:CM_RUNBATCH
+  dat "RUNBATCH",0
+:CM_LOADP
+  dat "LOADP",0
+:CM_HELP
+  dat "HELP",0
+
+:RunCommand
+  IFE [CommandWord], 0		SET PC, ShellStart	   
+
+  ; Finding the right command
+  SET B, CommandWord
+
+  SET A, CM_CLS		; CLS
+  SET C, Command_Clear
+  JSR CompareCommand
+  
+  SET A, CM_DIR		; DIR
+  SET C, Command_Dir
+  JSR CompareCommand
+  
+
+  SET A, CM_MEM
+  SET C, Command_Mem
+  JSR CompareCommand
+  
+
+  SET A, CM_FORMAT
+  SET C, Command_Format
+  JSR CompareCommand
+  
+  SET A, CM_RUNBATCH
+  SET C, Command_RunBatch
+  JSR CompareCommand
+  
+  SET A, CM_LOADP
+  SET C, Command_LoadP
+  JSR CompareCommand
+  
+  SET A, CM_HELP
+  SET C, Command_Help
+  JSR CompareCommand
+  
+
+  SET A, CM_SHOWMEM
+  SET C, Command_ShowMem
+  JSR CompareCommand
+  
+
+  SET A, CM_SETCOLOR
+  SET C, Command_SetColor
+  JSR CompareCommand
+  
+  SET A, CM_ABOUT	; ABOUT
+  SET C, Command_About
+  JSR CompareCommand
+  
+  SET A, CM_TEST		; TEST
+  SET C, Command_Test
+  JSR CompareCommand
+
+  ; else... Well..
+  ; Syntax Error then !
+:SyntaxError
+  SET A, STR_SyntaxError
+  SET PUSH, ShellStart ; Fake JSR then SET PC, ... 
+  SET PC, PrintStringNL 
+
+;===================================
+; CLS
+;===================================
+:Command_Clear
+  JSR [SYS_ClearScreen]
+  SET [Cursor_X], 0
+  SET [Cursor_Y], 0
+  SET PC, ShellStart
+
+:STR_HELP1
+ dat "Supported Commands :",0
+:STR_HELP2
+ dat "CLS DIR FORMAT LOADP RUNBATCH",0
+:STR_HELP3
+ dat "MEM SHOWMEM TEST SETCOLOR ABOUT",0
+
+:Command_Help
+  JSR [SYS_NextLine]
+  SET A, STR_HELP1
+  JSR PrintStringNL
+
+  SET A, STR_HELP2
+  JSR PrintStringNL
+
+  SET A, STR_HELP3
+  JSR PrintStringNL
+  SET PUSH, ShellStart
+  SET PC,[SYS_NextLine]
+  
+
+
+;===================================
+; DIR
+;===================================
+:STR_VolName
+	dat "Volume : [",0
+:STR_VolNameEnd
+	dat "]",0
+:STR_EntryHeader
+	dat "  >",0
+:STR_NoFile
+	dat "empty disk",0
+:STR_EndFile
+	dat " words",0
+	
+:Command_Dir
+
+ ; Displaying Volume Name
+ 
+  SET A, STR_VolName
+  JSR PrintString
+  JSR ZFAT_GetVolumeName
+  JSR PrintString
+  SET A, STR_VolNameEnd
+  JSR PrintStringNL
+ 
+ ; Counting Number of Files
+  JSR ZFAT_CountFiles 
+  IFN Z, 0		SET PC, Dir_ListFiles
+  
+  SET A, STR_NoFile
+  SET PUSH, ShellStart
+  SET PC, PrintStringNL
+  
+:Dir_ListFiles
+  SET C, 0
+  SET J, Z
+  
+:Dir_ListFilesLoop
+ 
+  SET A, STR_EntryHeader
+  JSR PrintString
+  SET A, C
+  JSR ZFAT_GetFileName
+  JSR PrintString
+  
+  SET [Cursor_X], 15
+  SET A, C
+  JSR ZFAT_GetFileSize
+  JSR PrintValueUnsigned
+  SET A, STR_EndFile
+  JSR PrintStringNL
+  
+  ADD C,1
+  IFN C, J	SET PC, Dir_ListFilesLoop
+  
+  SET PC, ShellStart
+
+;===================================
+; ABOUT
+;===================================
+:Command_About
+  JSR About
+  SET PC, ShellStart
+
+;===================================
+; MEM
+;===================================
+:Command_Mem
+  JSR PrintMEM
+  SET PC, ShellStart
+;===================================
+
+;===================================
+; PrintMem
+;===================================
+:PrintMEM
+  SET A, STR_MemAvail
+  JSR [SYS_PrintString]
+
+  JSR [SYS_MEM_GetTotalFreeMem]
+  SET A,Z
+  JSR [SYS_PrintValueUnsigned]
+  SET A, STR_Words
+  JSR [SYS_PrintStringNL]
+
+  SET A, STR_OSSIZE
+  JSR [SYS_PrintString]
+  SET A, MEM_HeapStart
+  JSR [SYS_PrintValueUnsigned]
+  SET A, STR_Words
+  JSR [SYS_PrintStringNL]
+
+  SET PC, POP
+
+
+;===================================
+:Command_Format
+  SET A,STR_FormatConfirm
+  JSR PrintStringNL
+:WaitForYesOrNo
+  JSR KeyboardGet
+  IFE Z,0				SET PC, WaitForYesOrNo
+  IFE Z, ASCIICode_Y	SET PC, DoFormat
+  IFE Z, ASCIICode_N	SET PC, ShellStart
+   
+  SET PC, WaitForYesOrNo
+  
+:DoFormat
+  SET A, STR_Formatting
+  JSR PrintStringNL
+  SET PC, ShellStart
+
+;===================================
+
+;===================================
+:Command_RunBatch
+  JSR DecodeCommand
+  SET A, CommandWord
+  IFE [A],0				SET PC, SyntaxError
+  SET A, STR_FileNotFound
+  JSR PrintString
+  SET A, CommandWord
+  JSR PrintStringNL
+  SET PC, ShellStart
+;===================================
+
+;===================================
+:Command_LoadP
+  JSR DecodeCommand
+  SET A, CommandWord
+  IFE [A],0		SET PC, SyntaxError
+  
+  SET A, CommandWord
+  JSR ZFAT_ExecProgram
+  IFE Z,0	SET PC, Command_LoadPFNF
+  
+  SET PC, ShellStart
+  
+:Command_LoadPFNF
+  SET A, STR_FileNotFound
+  JSR PrintString
+  SET A, ZFAT_FileNameBuffer2
+  JSR PrintStringNL
+  SET PC, ShellStart
+;===================================
+
+;===================================
+; String to Hex
+;===================================
+; Decodes a 4 digit hex number
+; from a string given in A
+; Outputs result into Y
+; Return Z = 1 if ok
+; Return Z = 0 if error
+;===================================
+:StringToHex
+  JSR PushAllRegs6
+  SET Y,0 ; Decoded number
+  SET I,0
+:NibbleLoop
+  SET C,[A] ; Decoded Nibble
+  IFE C,0	SET PC, NumberFinished
+  ADD A,1
+  IFG C, ASCIICode_9	SET PC, ShowMem_NAN
+  IFG ASCIICode_0 ,C	SET PC, ShowMem_NAN
+  SUB C, ASCIICode_0
+  SET PC, ShowMem_NibbleOk
+:ShowMem_NAN
+  IFG C, ASCIICode_F	SET PC, NumberError
+  IFG ASCIICode_A , C	SET PC, NumberError
+  SUB C,55 ; -65 + 10
+:ShowMem_NibbleOk
+  SHL Y,4
+  BOR Y,C
+  ADD I,1
+  IFG 4, I	SET PC, NibbleLoop
+  ; a 5th nibble ?
+  SET C,[A] ; Decoded Nibble
+  IFN C,0	SET PC, NumberError
+:NumberFinished
+  IFE I,0	SET PC, NumberError
+  SET Z,1
+  SET PC, PopRet6
+:NumberError
+  SET Z,0
+  SET PC, PopRet6
+
+;===================================
+; SHOWMEM
+;===================================
+:STR_AddressSeparator
+ dat " : ",0
+:STR_Space
+ dat " ",0
+:ShowMemLine
+  SET PUSH,B
+  SET PUSH,I
+
+ ; Printing the address
+  JSR PrintValueHex
+  SET B, A ; Saving A to B
+  SET A, STR_AddressSeparator ; " : "
+  JSR PrintString
+  SET I, 4
+:ShowMemLineLoop
+  SET A, [B]
+  ADD B, 1
+  JSR PrintValueHex
+  SET A, STR_Space
+  JSR PrintString
+  SUB I,1
+  IFN I,0	SET PC, ShowMemLineLoop
+  JSR NextLine
+  SET A, B
+  SET I,  POP
+  SET B,  POP
+  SET PC, POP
+;===================================
+
+
+;===================================
+:Command_ShowMem
+  JSR DecodeCommand
+  ; CommandWord should be a number from 0 to FFFF
+  SET A, CommandWord
+  JSR StringToHex
+  IFE Z,0	SET PC, SyntaxError
+  SET A, Y ; We have a starting Address
+  SET I,8
+:ShowmemLoop
+  JSR ShowMemLine
+  SUB I,1
+  IFN I,0	SET PC, ShowmemLoop
+  SET PC, ShellStart
+;===================================
+
+;===================================
+:Command_SetColor
+;===================================
+  JSR DecodeCommand
+  ; CommandWord should be a number from 0 to FFFF
+  SET A, CommandWord
+  JSR StringToHex
+  IFE Z,0	SET PC, SyntaxError
+  AND Y, 0xFF00
+  SET [CurrentColor], Y
+  SET PC,ShellStart
+;===================================
+
+
+;===================================
+; Dummy user code
+;===================================
+:Command_Test
+;  SET A, 0
+;  JSR [SYS_PrintValueHex]
+;  JSR [SYS_NextLine]
+
+  SET A, 0xFFFF
+  SET B, 2
+  MLI A,B
+  JSR [SYS_PrintValueSigned]
+  JSR [SYS_NextLine]
+  
+  SET A, 0xFFFE	; -2
+  SET B, 1
+  ASR A, B
+  JSR [SYS_PrintValueHex]
+  JSR [SYS_NextLine]
+  
+  ASR A, B
+  JSR [SYS_PrintValueHex]
+  JSR [SYS_NextLine]
+  
+  SHR A, B
+  JSR [SYS_PrintValueHex]
+  JSR [SYS_NextLine]
+  
+  SET A, 14848
+  SET B, 29907
+  SET X,1500
+  JSR Divide32By16
+  SET A, Y
+  JSR [SYS_PrintValueHex]
+  SET A, Z
+  JSR [SYS_PrintValueHex]
+  JSR [SYS_NextLine]
+
+;  SET A, 0
+;  JSR [SYS_PrintValueUnsigned]
+;  JSR [SYS_NextLine]
+
+;  SET A, 0x8000
+;  JSR [SYS_PrintValueSigned]
+;  JSR [SYS_NextLine]
+
+  SET PC, ShellStart
+
+:Hang
+  SET PC, Hang
+

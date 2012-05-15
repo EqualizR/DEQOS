@@ -1,0 +1,31 @@
+; Assembler test for DCPU
+
+.include "DEQOS_User.h16"
+
+.out "BREAK.PRG"
+
+	JSR [SYS_GetCurrColor]		; saving Current color in reg B
+	SET B, Z
+	SET C, 0x6000				; setting orange on black
+	JSR [SYS_SetCurrColor]		
+	
+	SET A, STR_1				; printing all the strings
+	JSR [SYS_PrintStringNL]
+	
+	SET C, B					; restoring current color
+	JSR [SYS_SetCurrColor]
+	
+	JSR WaitKey					; waiting for the user to press a key
+	
+	BRK
+	
+	SET PC,POP					; Returning to the system
+	
+:WaitKey
+	JSR [SYS_BlockIfRunningInBackground]
+	JSR [SYS_KeyboardGet]
+	IFE Z,0			SET PC, WaitKey
+	SET PC, POP
+
+:STR_1
+	dat "press key to break", 0

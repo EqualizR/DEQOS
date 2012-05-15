@@ -1,0 +1,611 @@
+;====================================================================
+; Preemptive Multi tasking system for DEQOS
+;====================================================================
+
+
+;====================================================================
+; ProcessInformation structure
+;
+.def Proc_ID			0		; ID of the process			= 1 wd
+.def Proc_Name			1		; String (10 chars + 0)		= 11 wd
+.def Proc_VideoBuffer	12		; Video Buffer				= 1 wd
+.def Proc_CharTable		13		; Character Table			= 1 wd
+.def Proc_Cursor		14		; cursor X and Y			= 2 wd
+.def Proc_CursorY		15		; cursor X and Y			= 2 wd
+.def Proc_Color			16		; Color						= 1 wd
+.def Proc_StackSize		17		; StackSize					= 1 wd
+.def Proc_BaseStack		18		; Memory bloc for stack		= 1 wd
+.def Proc_SP			19		;							= 1 wd
+.def Proc_ProgramSize	20		; bloc size for code		= 1 wd
+.def Proc_ProgramBloc	21		; Mem bloc for code			= 1 wd
+.def Proc_BasePriority  22		; Base priority for thread	= 1 wd
+.def Proc_CurrentPrio	23		; Current priority			= 1 wd
+.def Proc_ConsoleNumber 24		
+.def Proc_SizeOf		25
+;====================================================================
+
+.macro Px_VideoBuffer(register) { [12+register] }
+
+;====================================================================
+; Variables
+;====================================================================
+:DEQOS_TaskArray	; Current active task array (Max = 20)
+	dat "012345678901234567890"	; 20 tasks
+
+:DEQOS_NbTasks	; Number of active tasks
+	dat 0
+
+:CurrTask		; Currently active task
+	dat 0
+
+:SchedulerReady	; Flag that indicates the task system has been initialized
+	dat 0
+	
+;====================================================================
+; Console structure
+;====================================================================
+.def Console_VideoMem  		0	; pointer to console's video memory
+.def Console_FontMem		1	; pointer to console's font memory
+.def Console_ActivationMutex 2	; pointer to console's mutex for activation
+.def Console_SizeOf			3
+
+
+:DEQOS_ConsoleArray				; array of all the consoles
+	dat "012345" ; 6 consoles max
+:DEQOS_NbConsoles					; current number of consoles
+	dat 0
+:CurrConsole					; current active console
+	dat 0
+:CurrTaskConsole				; current task's console
+	dat 0	
+	
+;====================================================================
+; DEQOS_AddConsole : Adds the console in A
+;====================================================================
+:DEQOS_AddConsole
+	SET PUSH, B
+	SET B, [DEQOS_NbConsoles]
+	ADD B, DEQOS_ConsoleArray
+	SET [B], A
+	ADD [DEQOS_NbConsoles],1
+	SET B, POP
+	SET PC, POP
+	
+;====================================================================
+; DEQOS_CreateConsoles : creates all the system's consoles
+;====================================================================
+:DEQOS_CreateConsoles
+	JSR PushAllRegs8
+	
+	SET [DEQOS_NbConsoles], 0
+	
+	; allocating first console's structure
+	SET A, Console_SizeOf
+	JSR MEM_Alloc
+	SET X, Z
+	
+	SET A, 0
+	JSR DEQOS_CreateMutex
+	SET [Console_ActivationMutex + X], Z
+	
+	; using the system's display and font buffers
+	SET [Console_VideoMem+X], [DisplayBuffer]
+	SET [Console_FontMem+X], [FontBuffer]
+	SET A, X
+	JSR DEQOS_AddConsole	; adding the console
+	
+	SET I,1
+	:CreateAllConsoles
+		; allocating second console
+		SET A, Console_SizeOf
+		JSR MEM_Alloc
+		SET X, Z
+		
+		SET A, 0
+		JSR DEQOS_CreateMutex
+		SET [Console_ActivationMutex + X], Z
+		
+		; allocating display and font buffers in one bloc
+		SET A, VIDEO_CHARSET_End	
+		JSR MEM_Alloc
+		
+		; setting the display and font pointers
+		SET [Console_VideoMem+X], Z
+		ADD Z, VIDEO_MEM_End
+		SET [Console_FontMem+X], Z
+		; initializes the font buffer with default font
+		JSR DEQOS_InitFont
+		
+		SET A, X
+		JSR DEQOS_AddConsole	; adding the console
+		ADD I,1
+		IFN I,3
+			SET PC, CreateAllConsoles
+	
+	SET PC, PopRet8
+	
+;====================================================================
+; A = Task to add at the end of the task array
+;====================================================================
+:AddTask
+	JSR PushAllRegs3
+	
+	SET B, [DEQOS_NbTasks]
+	ADD B, DEQOS_TaskArray
+	SET [B], A
+	ADD [DEQOS_NbTasks],1
+	
+	SET PC, PopRet3
+
+;====================================================================
+; A = task index to remove from task array
+;====================================================================
+:RemoveTask
+	JSR PushAllRegs3
+	SUB [DEQOS_NbTasks], 1
+	ADD A, DEQOS_TaskArray	; A = task to remove
+	SET B, [DEQOS_NbTasks]
+	ADD B, DEQOS_TaskArray	; B = end of task array
+	:RemoveTaskLoop
+		SET [A],[1+A]		; shifting the remaining tasks
+		ADD A,1
+		IFN A,B
+			SET PC, RemoveTaskLoop
+	SET PC, PopRet3
+	
+;====================================================================
+; DEQOS_InitFont : Initializing the Font buffer with default font
+; Z = Font buffer
+;====================================================================
+:DEQOS_InitFont
+	JSR PushAllRegs5
+	SET I, Z
+	SET J, DEQOS_DefaultCharacterTable
+	SET C, 0x100
+	ADD C, I
+	
+	:DEQOS_InitFontLoop	; 4x unroll for little speed up
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		IFN I, C
+			SET PC, DEQOS_InitFontLoop
+	
+	SET PC, POPRet5
+
+;====================================================================
+; CreateConsoleTask :
+;	Creates the task associated to a given console
+; A = Console
+; return Z = task descriptor
+;====================================================================
+:CreateConsoleTask
+	JSR PushAllRegs7
+	
+	SET Y, A ; console number
+	
+	; allocating task descriptor
+	SET A, Proc_SizeOf
+	JSR MEM_Alloc
+	SET X, Z
+	
+	; memset to 0
+	SET A, Z  		SET B, 0 		SET C, Proc_SizeOf
+	JSR memset
+	
+	SET PUSH, Y
+	
+	SET [Proc_ConsoleNumber+X], Y					; Setting the task's console
+	
+	ADD Y, DEQOS_ConsoleArray							; getting the console's
+	SET Y, [Y] 										; structure pointer
+	
+	SET [Proc_VideoBuffer+X], [Console_VideoMem+Y]	; Setting the task's display
+	SET [Proc_CharTable+X], [Console_FontMem+Y]		; and font buffers
+	SET Y, POP
+	
+	SET [Proc_BasePriority+X], 8					; initial priorities
+	SET [Proc_CurrentPrio+X],  8
+	
+	SET [Proc_Color+X], 0x8000						; task current color
+	
+	IFN Y, 0										; if not console #0
+		SET PC, AllocateStack						; we allocate a stack
+	
+	; else, we use the system's stack
+	SET [Proc_StackSize+X], 0xB00					
+	SET [Proc_BaseStack+X], 0xF500
+	SET [Proc_SP+X], SP								; use current SP
+	SET PC, StackAllocated
+:AllocateStack
+	SET A,  512							; Stack size
+	SET [Proc_StackSize+X], A
+	SET C, A
+	
+	JSR MEM_Alloc
+	
+	SET A, Z 		SET B, 0
+	JSR memset
+	
+	SET [Proc_BaseStack+X], Z
+	ADD Z, [Proc_StackSize+X]
+	SET [Proc_SP+X], Z				; Set SP to top of the stack
+	
+:StackAllocated
+	
+	; Setting fake stack so that when the scheduler sets this 
+	; task as active, we end up with PC == Shell
+	SET Y, [Proc_SP+X]
+	SUB Y,1		SET [Y], Shell			; RFI - PC
+	JSR DEQOS_SetDummyStack
+	
+	SET Z, X							; returns the allocated task
+	
+	SET PC, PopRet7
+
+;====================================================================
+; DEQOS_LaunchConsoles
+;    Creates all the consoles, the associated tasks
+;====================================================================
+:DEQOS_LaunchConsoles
+
+	JSR DEQOS_CreateConsoles
+	
+	SET I,0
+	
+	:DEQOS_CreateAllTasks
+		SET A,I					; creates the task for the console
+		JSR CreateConsoleTask
+		SET A, Z
+		JSR AddTask
+		ADD I,1
+		IFN I,3
+			SET PC, DEQOS_CreateAllTasks
+	
+	SET A,0					; creates the dummy idle task (necessary)
+	JSR CreateIdleTask
+	SET A, Z
+	JSR AddTask
+	
+	SET [CurrTask], 0		; setting the current task (must be 0)
+	SET [CurrConsole], 0	; and current console
+	
+	SET [SchedulerReady], 1	; allowing the scheduler to run
+	
+  SET PC, Shell				; launching the shell
+  
+;========================================================================
+:DEQOS_HaltCurrentTask
+	; instead of popping the return address, and pushing I,
+	; we simply start by pushing J .. and will replace the return address
+	; by I at the end of the function
+	
+	; SET PUSH, I
+	SET PUSH, J
+	SET PUSH, X
+	SET PUSH, Y
+	SET PUSH, Z
+	SET PUSH, B
+	SET PUSH, C
+	
+	SET B, [CurrTask]		; getting current task's pointer
+	ADD B, DEQOS_TaskArray
+	SET B, [B]
+	
+	; Saving all task context
+	
+	SET [Proc_Cursor+B],      [Cursor_X]
+	SET [Proc_CursorY+B],     [Cursor_Y]
+	SET [Proc_VideoBuffer+B], [DisplayBuffer]
+	SET [Proc_CharTable+B],   [FontBuffer]
+	SET [Proc_Color+B],       [CurrentColor]
+	SET [Proc_SP+B], SP
+	
+	SET J, PICK 6    	; we retrieve the return address
+	SET PICK 6, I		; and store I there
+	
+	SET PC, J
+	
+;====================================================================
+; SwitchToTask
+;       The heart of the preemptive multi tasking system
+;		Halts the current task, and resumes another one
+; A = next currtask
+;====================================================================
+:SwitchToTask
+	IFE A, [CurrTask]		; nothing to do ?
+		SET PC, POP
+		
+	IFN [CurrTask], 0xFFFF ; is there some active curtask to halt ?
+		JSR DEQOS_HaltCurrentTask
+
+	;--- resuming new task.. 
+
+	SET [CurrTask], A		; setting current task
+	ADD A, DEQOS_TaskArray	; and getting its pointer
+	SET A, [A]
+	
+	; Restoring task context
+	SET [CurrTaskConsole], 	[Proc_ConsoleNumber+A]
+	SET [Cursor_X], 		[Proc_Cursor+A]
+	SET [Cursor_Y], 		[Proc_CursorY+A]
+	SET [DisplayBuffer], 	[Proc_VideoBuffer+A]
+	SET [FontBuffer], 		[Proc_CharTable+A]
+	SET [CurrentColor], 	[Proc_Color+A]
+
+	; restoring registers, and PC (that will resume the task)
+	SET SP, [Proc_SP+A]
+	SET C, POP
+	SET B, POP
+	SET Z, POP
+	SET Y, POP
+	SET X, POP
+	SET J, POP
+	SET I, POP
+	SET PC, POP	; and done !!!
+
+
+;====================================================================
+; DEQOS_SetTask
+;    Resume the task
+;    A = TASK index
+;====================================================================
+:DEQOS_SetTask
+	JSR SwitchToTask
+:SetTaskRFI
+	SET EX, POP
+	RFI 0
+
+;====================================================================
+; DEQOS_SetCurrentConsole
+;	A = console number
+;====================================================================
+:DEQOS_SetCurrentConsole
+	
+	IFE [CurrConsole], A
+		SET PC, SetCurrConsoleEnd
+		
+	SET PUSH, X
+	SET PUSH, A
+	SET PUSH, B
+	
+	SET X, A
+	SET [CurrConsole], X		; setting current console
+	ADD X, DEQOS_ConsoleArray		; getting console struct pointer
+	SET X, [X]
+		
+	; Setting display and font buffers to the screen...
+	SET A, NELEM1802_MEM_MAP_SCREEN 	SET B, [Console_VideoMem+X]
+	HWI [LEM1802_ID]
+	SET A, NELEM1802_MEM_MAP_FONT 		SET B, [Console_FontMem+X]
+	HWI [LEM1802_ID]
+	
+	; re-activated tasks that were blocked because they were out of focus.
+	SET A,[Console_ActivationMutex + X]
+	JSR DEQOS_ActivateMutexTasks
+	
+	SET B, POP
+	SET A, POP
+	SET X, POP
+:SetCurrConsoleEnd
+	SET EX, POP
+	RFI 0
+
+;====================================================================
+; DEQOS_Scheduler : decides which task should run
+;------------------
+;	This allows to run all the active tasks according to their
+;	priorities. 
+;	Each task is given a base priority
+;	during each scheduling pass, all current priorities are decreased
+;	then, the task array is sorted (simple bubble sort) with ascending
+;   priorities..
+; 	The first task in the array is then resumed, and its priority
+; 	is set back to its base priority..
+; 	this way, 2 tasks, with priorities 1 and 5 will both run at the 
+;	same time, only the one with the 5 priority, will have 5 time less
+;	CPU time.
+;====================================================================
+:DEQOS_Scheduler
+	JSR PushAllRegs7
+	
+	; must decrease all prios
+	SET I, DEQOS_TaskArray
+	SET X, I;
+	ADD X, [DEQOS_NbTasks]	; X = end of the task array
+
+	:DecLoop
+		STI A, [I]							; i++ and j++ implied
+		IFN [Proc_CurrentPrio+A], 0			; if already 0, we don't decrease
+			SUB [Proc_CurrentPrio+A],1
+		IFN I,X
+			SET PC, DecLoop
+			
+	; Now must bubble sort the tasks
+	; Bubble sort is an appropriate choice here
+	; as there is a very small number of tasks
+	; with very few swaps
+	
+	SUB X, 1							; so that [X] is a valid task
+	IFE X, DEQOS_TaskArray				; only one task ?
+		SET PC, EndSort
+	
+	:BubbleSortBegin
+		SET I, DEQOS_TaskArray
+		SET Y,0								; swap flag to false
+		:SortLoop
+			SET A, [I]
+			SET B, [1+I]
+			IFG [Proc_CurrentPrio+A], [Proc_CurrentPrio+B]	; wrong order
+				SET PC, SwapTasks							; we swap
+		:ContinueSort
+			ADD I, 1
+			IFN I, X
+				SET PC, SortLoop
+		IFE Y, 1							; if we did swap, chances are 
+			SET PC, BubbleSortBegin			; the array isn't sorted yet, we do another run
+			
+	SET PC, EndSort
+	
+:SwapTasks
+	SET [I], B							; inverting tasks B and A
+	SET [1+I], A
+	SET C, [CurrTask]					; if one is CurrTask, we must update CurrTask too
+	SET J, I							; gets B in J
+	SUB J, DEQOS_TaskArray				; retrieve the index
+	IFE J, [CurrTask]	ADD C, 1		
+	ADD J, 1
+	IFE J, [CurrTask]	SUB C, 1
+	SET [CurrTask], C
+	SET Y, 1							; Marks that at least one swap occurred
+	SET PC, ContinueSort
+		
+:EndSort
+	; Task array has been sorted
+	SET Y, POP
+	SET X, POP
+	SET J, POP
+	SET I, POP
+	SET C, POP
+	SET B, POP
+	;SET A, POP
+	ADD SP, 2   ; A + PC return address from JSR PushAllRegs7
+	
+	; we're about to resume the first task of the array
+	; we start by setting its prio back to the base one
+	SET A, [DEQOS_TaskArray]
+	SET [Proc_CurrentPrio+A], [Proc_BasePriority+A]
+	
+	; and here we go...
+	SET A, 0
+	SET PC, DEQOS_SetTask
+	
+	
+;====================================================================
+; DEQOS_SetThreadPriority
+;  Changes the current task priority
+;====================================================================
+:DEQOS_SetThreadPriority
+	SET PUSH, B
+	
+	IAQ 1	; blocking the interrupts ----------------
+	
+	 	SET B, [CurrTask]
+	 	ADD B, DEQOS_TaskArray
+	 	SET B, [B]
+	 	SET [Proc_BasePriority+B], A
+	 	
+	IAQ 0	; restoring the interrupts ---------------
+	
+	SET B, POP
+	SET PC, POP
+	
+;====================================================================
+; CreateIdleTask
+;
+; A = Console
+; return Z = task descriptor
+;====================================================================
+:CreateIdleTask
+	JSR PushAllRegs7
+	
+	SET Y, A ; console number
+	
+	; allocating task descriptor
+	SET A, Proc_SizeOf
+	SET C, A				; for memset after
+	JSR MEM_Alloc
+	SET X, Z
+	
+	; memset to 0
+	SET A, Z  		SET B, 0 	;SET C, Proc_SizeOf
+	JSR memset
+	
+	SET [Proc_ConsoleNumber+X], Y
+	
+	; unnecessary :
+	; SET [Proc_VideoBuffer+X], 0
+	; SET [Proc_CharTable+X],   0
+	; SET [Proc_Color+X], 0x8000
+	
+	SET [Proc_BasePriority+X], 0xFF00	; very very very low priority
+	SET [Proc_CurrentPrio+X],  0xFF00	; should almost never run
+	
+	
+	SET A,  32							; minimal stack size
+	SET [Proc_StackSize+X], A			; just enough for task switching
+	SET C, A							; for the on going memset
+	JSR MEM_Alloc
+	
+	SET A, Z 		SET B, 0
+	JSR memset
+	
+	SET [Proc_BaseStack+X], Z
+	ADD Z, [Proc_StackSize+X]
+	SET [Proc_SP+X], Z
+	
+	; Setting fake stack so that, when resuming that task
+	; we end up in IdleLoop
+	SET Y, [Proc_SP+X]
+	SUB Y,1		SET [Y], IdleLoop		; RFI - PC
+	JSR DEQOS_SetDummyStack
+	
+	SET Z, X
+	
+	SET PC, PopRet7
+	
+;==========================================================
+; SetDummyStack
+;----------------------
+; Scheduler uses the thread's own stack to store its context
+; When resuming a thread, it will pop the context, so,
+; when creating a new task, we must do as if the scheduler
+; stopped it already, and prepare the stack so that the scheduler
+; can restore the desired context.
+;==========================================================
+:DEQOS_SetDummyStack
+	SUB Y,1		SET [Y], 9				; RFI - A
+	SUB Y,1		SET [Y], 8				; EX
+	SUB Y,1		SET [Y], SetTaskRFI		; Return address for SwithToTask
+	SUB Y,1		SET [Y], 7				; SET PUSH, I
+	SUB Y,1		SET [Y], 6				; SET PUSH, J
+	SUB Y,1		SET [Y], 5				; SET PUSH, X
+	SUB Y,1		SET [Y], 4				; SET PUSH, Y
+	SUB Y,1		SET [Y], 3				; SET PUSH, Z
+	SUB Y,1		SET [Y], 2				; SET PUSH, B
+	SUB Y,1		SET [Y], 1				; SET PUSH, C			
+	SET [Proc_SP+X], Y
+	SET PC, POP
+	
+;====================================================================
+; This is the idle loop.. does nothing at all
+;====================================================================
+:IdleLoop
+	SET PC, IdleLoop
+	
+;====================================================================
+; Blocks the process when running while its console isn't on
+; (Out of focus)
+; All the blocked processes will resume when that console is activated
+;====================================================================
+:DEQOS_BlockIfNotOnMyConsole
+	IAQ 1
+	
+	IFN [CurrConsole], [CurrTaskConsole]
+		JSR BlockThisTaskUntilConsoleActivation
+		
+	IAQ 0
+	SET PC, Pop
+	
+:BlockThisTaskUntilConsoleActivation
+	SET PUSH, A
+	SET A, [CurrTaskConsole]
+	ADD A, DEQOS_ConsoleArray
+	SET A, [A]
+	SET A, [Console_ActivationMutex+A]
+	JSR Mutex_Lock_InterruptBlocked
+	SET A, POP
+	SET PC, POP
+	
+.include "DEQOS_Mutex.a16"

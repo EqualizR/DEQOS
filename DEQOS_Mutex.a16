@@ -1,0 +1,202 @@
+;====================================================================
+; MUTEX handling..
+;====================================================================
+; Those are actually semaphores. here's how this works
+;
+; A Semaphore has a counter that represents the number of threads
+; that can access the protected resource at the same time
+; Typically, that count is 1 for most mutexes.
+;
+; When a mutex is locked, if the counter is non zero, it is decreased
+; and we return.. the caller thread can use the resource
+; if another thread attempts to lock the mutex when its counter is 0
+; the thread is halted, removed from the scheduler's task list, 
+; and pushed to the mutex "blocked threads list"
+; The blocked thread no longer runs !
+;
+; When the other thread that was using the resource releases the mutex
+; if it has blocked threads, it will reactivate one.
+; and when no threads are bocked, it will increase the counter to get
+; back to its initial value
+;
+
+; mutex format :
+.def Mutex_Count 		0
+.def Mutex_ListCount  	1
+.def Mutex_List			2 ; .. to 16
+.def Mutex_Size  		17
+
+
+;====================================================================
+; Creates a mutex, with A for initial count (usually 1)
+;====================================================================
+:DEQOS_CreateMutex
+	JSR PushAllRegs4
+	
+	SET I,A
+	SET A, Mutex_Size
+	SET C, A				; for the memset after...
+	JSR MEM_Alloc			; allocating the structure
+	
+	SET A, Z	SET B,0		; zeroing the whole mutex
+	JSR memset
+	
+	SET [Z], I				; sets the initial count
+			
+	SET PC,PopRet4
+
+;====================================================================
+; Mutex_Lock
+;	Locks the mutex... if already locked, halts the task until
+;   the mutex gets released
+; A = Mutex
+;====================================================================
+:Mutex_Lock
+	IFE [SchedulerReady],0		SET PC, POP
+	
+	IAQ 1	; Blocking the interrupts ------------------------
+:Mutex_Lock_InterruptBlocked
+		SET PUSH, A
+		SET PUSH, EX
+		
+		IFE [A],0					; already taken ?
+			SET PC, MutexLocked		; we halt that task
+			
+		SUB [A], 1					; else, we decrease the counter
+:MutexResume
+		; do not modify
+		SET EX, POP
+	RFI 0	; ------------------------------------------------
+	
+:MutexLocked
+
+	; halting current task
+	
+	SET PUSH, MutexResume	; return address when task is resumed
+	JSR DEQOS_HaltCurrentTask
+
+	SET C, [CurrTask]
+	SET [CurrTask], 0xFFFF 		; Current task = no current task
+								; The scheduler won't try to halt it
+
+	SET I, A 					; saving mutex pointer
+	
+	SET A, C					; removing current task from the Active task array
+	JSR RemoveTask	
+	
+								; Enqueue it in the Mutex's blocked tasks array
+	SET A, I	; A = mutex, B = task desc
+	
+	;JSR MutexEnqueue
+	;SET PC, DEQOS_Scheduler		; calling the scheduler to resume another task
+								; .. will resume the idle task if no other is active
+	; saved one cycle :		
+	SET PUSH, DEQOS_Scheduler
+	SET PC, MutexEnqueue
+
+;====================================================================
+; MutexEnqueue
+;	Adds a task to the mutex task queue...
+;   A = mutex
+;   B = task
+;====================================================================
+:MutexEnqueue
+	SET PUSH, C
+		SET C, [Mutex_ListCount+A]	; C = index in array
+		ADD C, A					; Adding the mutex address
+		ADD C, Mutex_List			; and the offset of the list, now : C = Mutex->List[C]
+		SET [C], B					; storing the task
+		ADD [Mutex_ListCount+A], 1	; increase blocked thread counter
+	SET C, POP
+	SET PC, POP
+	
+;====================================================================
+; Mutex_Release
+;  Releases the resource..
+;   if a task was blocked in this mutex, it will pop one and put it
+;   back into the active task array
+; A = Mutex
+;====================================================================
+:Mutex_Release
+	IFE [SchedulerReady],0		SET PC, POP
+	
+	IAQ 1	; Blocking interrupts --------------------------
+		SET PUSH, A
+		SET PUSH, EX
+		
+		IFN [Mutex_ListCount+A],0    			; if blocked task list not empty
+			SET PC, MutexUnlockOnePendingTask	; we pop one...
+			
+		ADD [A], 1			; else, we increase the mutex counter
+		SET EX, POP
+	RFI 0	; ----------------------------------------------
+	
+:MutexUnlockOnePendingTask
+	JSR PushAllRegs5
+	
+	SET B, [Mutex_List+A]	; poping first task
+	SET PUSH, A
+	SET A, B
+	JSR AddTask				; adding to Task Array
+	SET A, POP
+	
+	; Removing from the mutex' task list
+	SET I, A
+	ADD I, Mutex_List
+	SUB [Mutex_ListCount+A], 1
+	SET C, I
+	ADD C, [Mutex_ListCount+A]
+	:MutexUnlockOnePendingLoop
+		STI [I],[1+I]		; does i++ and j++ (unused)
+		IFL I, C
+			SET PC, MutexUnlockOnePendingLoop
+	SET J, POP
+	SET I, POP
+	SET C, POP
+	SET B, POP
+	SET A, POP
+	ADD SP, 1 ; empty pop (return address from the JSR Push)
+		
+	SET PC, DEQOS_Scheduler		; calling the scheduler
+
+;====================================================
+; Activates all blocked tasks of Mutex in A
+; Used with 0 count semaphores for unlocking all tasks
+; when mutex is signaled
+;
+;*@**@**@**@**@**@**@**@**@**@**@**@**@**@**@**@**@*
+; !! only to be called in blocked interrupt mode !!
+;*@**@**@**@**@**@**@**@**@**@**@**@**@**@**@**@**@*
+;====================================================	
+:DEQOS_ActivateMutexTasks
+	
+	IFE [SchedulerReady],0		SET PC, POP
+	
+:ActivateMutexLoop
+	IFN [Mutex_ListCount+A],0    			; if blocked task list not empty
+		JSR MutexActivateOnePendingTask		; we pop one...
+	IFN [Mutex_ListCount+A],0				; still some ?
+		SET PC, ActivateMutexLoop
+	
+	SET PC, POP
+
+:MutexActivateOnePendingTask
+	JSR PushAllRegs5
+	
+	SET B, [Mutex_List+A]	; poping first task
+	SET PUSH, A
+	SET A, B
+	JSR AddTask				; adding to Task Array
+	SET A, POP
+	
+	; Removing from the mutex' task list
+	SET I, A
+	ADD I, Mutex_List
+	SUB [Mutex_ListCount+A], 1
+	SET C, I
+	ADD C, [Mutex_ListCount+A]
+	:MutexActivateOnePendingLoop
+		STI [I],[1+I]		; does i++ and j++ (unused)
+		IFL I, C
+			SET PC, MutexActivateOnePendingLoop
+	SET PC, PopRet5

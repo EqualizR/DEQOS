@@ -1,0 +1,324 @@
+
+;===================================
+;========= MEMORY MANAGER ==========
+; Memory system is based on Linked list
+; of free blocs
+; Each free bloc has its size stored in the
+; first word, and a pointer to the next bloc
+; in the second word
+; Anchor is stored in variable MEM_FirstFreeBloc
+;===================================
+
+:MEM_Mutex
+	dat 1
+:MEM_MutexList
+	dat "00000000000000000",0
+
+;===================================
+; MEM_Init
+;===================================
+;---- Initializes the memory system
+;===================================
+:MEM_Init
+ JSR PushAllRegs8
+ 
+ SET [MEM_Mutex], 1
+ SET [MEM_MutexList], 0
+ 
+ ; Constructing the Heap
+ ; It's made of 2 blocs
+ ; memory layout is :
+ ; [this code]
+ ; [BLOC1]
+ ; [VideoMem]
+ ; [BLOC2]
+ ; [Sector Buffer]
+ ; [BLOC3]
+ ; [Keyboard]
+ ; [BLOC4]
+ ; [Stack]
+
+	 SET [MEM_FirstFreeBloc], 0;
+
+	 ; Adding all the available space :
+	 
+	 ; To add a bloc here :
+	 ; SET A, Begining of the free bloc
+	 ; SET [A], End of the bloc
+	 ; JSR MEM_CreateAvailableBloc
+	 
+	 SET A,   MEM_HeapStart
+	 SET [A], [DisplayBuffer]
+	 JSR MEM_CreateAvailableBloc
+	 
+	 ; ## VIDEO_CHARSET_End --> ZFAT_SectorBufferMemory
+	 SET  A, VIDEO_CHARSET_End ; End of video memory
+	 ADD  A, [DisplayBuffer]
+	 SET [A], ZFAT_SectorBufferMemory
+	 JSR MEM_CreateAvailableBloc
+	 
+	 ; ## ZFAT_SectorBufferEnd --> KEYBOARD_BUFFER 
+	 SET  A, ZFAT_SectorBufferEnd  ; End of video memory
+	 SET [A], KEYBOARD_BUFFER
+	 JSR MEM_CreateAvailableBloc
+	 
+	 ; ## SYS_COMMAND_END -> STACK_END
+	 SET  A, SYS_COMMAND_END  ; next bloc
+	 SET [A], STACK_END
+	 JSR MEM_CreateAvailableBloc
+
+	 SET PC, PopRet8
+ 
+:MEM_CreateAvailableBloc
+	 SUB [A], A
+	 ADD  A,  1 ; Faking an alloced block to use MEM_Free
+	 ; JSR MEM_Free
+	 ; SET PC, POP -> those 2 are combined into one SET PC, MEM_Free
+	 SET PC, MEM_Free
+;---------------------------------------------
+
+:MEM_Lock
+	SET PUSH,A
+	SET A, MEM_Mutex
+	JSR Mutex_Lock
+	SET A, POP
+	SET PC, POP
+
+:MEM_Unlock
+	SET PUSH,A
+	SET A, MEM_Mutex
+	JSR Mutex_Release
+	SET A, POP
+	SET PC, POP
+
+
+;===================================
+; MEM_GetTotalFreeMem
+;===================================
+; returns in Z the total amount of
+; free memory in heap
+;===================================
+:MEM_GetTotalFreeMem
+  SET PUSH, A
+  
+  JSR MEM_Lock
+  
+  SET Z, 0       ; Counter
+  SET A, [MEM_FirstFreeBloc]
+:MEM_ReportFreeMemL1
+  ADD Z, [A]
+  SET A, [1+A]
+  IFN A, 0	SET PC, MEM_ReportFreeMemL1
+  
+  JSR MEM_Unlock
+  
+  SET A, POP
+  SET PC, POP
+;===================================
+
+;===================================
+; MEM_Alloc
+;===================================
+; Requested size (in words) in A
+; Returns pointer in Z
+;===================================
+:MEM_Alloc
+ JSR PushAllRegs7
+ 
+ JSR MEM_Lock
+ 
+ SET Z, 0       ; return pointer
+ ADD A, 2       ; need the header
+
+ SET B, [MEM_FirstFreeBloc]  ; First Bloc
+:MEM_AllocL1
+	SET C, [B]	; Getting size of bloc
+
+	; if B->Size > Requested size, we found it !
+	IFG C, A	SET PC, MEM_AllocFound
+
+	; also if B->Size == Requested size !
+	IFE C, A	SET PC, MEM_AllocFound
+
+	SET B, [1+B]     ; Parsing through next bloc
+	IFN B, 0	SET PC, MEM_AllocL1
+
+ SET PC, MEM_AllocDone ; returning 0 :(
+
+:MEM_AllocFound
+ ; Bloc B is a candidate
+ ; Computing start of new bloc
+ SET Z, B ; Setting the return value
+ SET X, B
+ ADD X, A ; X = new start
+ SET Y, C
+ SUB Y, A ; Y = new size
+
+; Remaining bloc bigger than 3 ?
+ IFG Y, 3	SET PC, MEM_AllocSplitBloc
+
+ ; here, the remaining part is too small
+ ; to create a new bloc.. we just increase
+ ; the allocation size to take the whole
+ ; bloc
+ SET A, C ; size to allocate = whole bloc
+
+ ; First bloc ?
+ IFN B, [MEM_FirstFreeBloc]		SET PC, MEM_Alloc_NotFirstBloc
+ ; it IS the first bloc
+ SET [MEM_FirstFreeBloc], [1+B] ; first free bloc = B->Next
+ SET PC, MEM_AllocDone
+
+:MEM_Alloc_NotFirstBloc
+
+ ; searching for B bloc predecessor
+ SET I, [MEM_FirstFreeBloc]
+:MEM_Alloc_NotFirstBlocCont
+
+; I->Next == B ?
+ IFE [1+I], B	SET PC, MEM_Alloc_NotFirstBloc2
+ SET I, [1+I]    ; I = I->Next
+ SET PC, MEM_Alloc_NotFirstBlocCont
+
+:MEM_Alloc_NotFirstBloc2
+ ; Here, we simply remove the bloc B
+ ; p->Next = p->Next->Next
+ SET [1+I], [1+B]
+ SET PC, MEM_AllocDone    ; And we're done !
+
+:MEM_AllocSplitBloc
+
+; preparing the new free bloc
+ SET [X], Y
+ SET [1+X], [1+B]
+
+ ; First bloc ?
+ IFN B, [MEM_FirstFreeBloc]	  SET PC, MEM_Alloc_NotFirstBloc3
+ ; it IS the first bloc
+ SET [MEM_FirstFreeBloc], X
+ SET PC, MEM_AllocDone
+
+:MEM_Alloc_NotFirstBloc3
+ ; searching for B bloc predecessor
+ SET I, [MEM_FirstFreeBloc]
+
+:MEM_Alloc_NotFirstBloc3Cont
+ IFE [1+I], B	SET PC, MEM_Alloc_NotFirstBloc4
+ SET I, [1+I]
+ SET PC, MEM_Alloc_NotFirstBloc3Cont
+
+:MEM_Alloc_NotFirstBloc4
+ SET [1+I], X           ; p->Next = X
+ SET PC, MEM_AllocDone
+
+:MEM_AllocDone
+
+ IFE Z, 0	SET PC, MEM_AllocExit
+
+ SET [Z], A
+ ADD Z, 1
+ 
+:MEM_AllocExit
+ JSR MEM_Unlock
+ 
+ SET PC, PopRet7
+;===================================
+
+;===================================
+; MEM_Free
+;===================================
+; Frees the pointer given in A
+;===================================
+:MEM_Free
+ 
+ IFE A, 0 SET PC, POP       ; return if A NULL
+
+ JSR PushAllRegs8
+ 
+ JSR MEM_Lock
+
+ SUB A, 1           ; getting the bloc header
+ SET C, [A]         ; Getting the size
+
+ ; Must now find the right place in the
+ ; free chain to insert this bloc
+
+ ; 1st case, there are no free blocs at all
+ ; we put it as first bloc (obvious)
+ IFE [MEM_FirstFreeBloc], 0 SET PC, MEM_Free_PutItFirst 
+
+ ; 2nd case : if A < First Free Bloc address
+ ; again, we put it first
+ IFG [MEM_FirstFreeBloc], A SET PC, MEM_Free_PutItFirst 
+
+ ; A should be in the middle or at the end of the Free chain
+ ; We must find the right place
+
+  ; NOTE :
+  ; If you crash here
+  ; chances are your memory got
+  ; corrupted
+
+ SET B, [MEM_FirstFreeBloc]
+:MEM_Free_SearchBloc
+
+	; if A < B->Next
+	IFG [1+B], A	SET PC, MEM_Free_InsertAfterBlocB ; Found ! We insert between B and B->Next
+
+	; if B->Next is 0.. we must insert it after B !
+	IFE [1+B], 0	SET PC, MEM_Free_InsertAfterBlocB
+
+	; looping...
+	SET B,[1+B]
+	SET PC, MEM_Free_SearchBloc
+
+:MEM_Free_InsertAfterBlocB
+ ; here we do
+ ; A->Next = B->Next
+ ; B->Next = A
+ SET [1+A], [1+B]
+ SET [1+B], A
+ SET PC, MEM_Free_Consolidate_Internal
+
+:MEM_Free_PutItFirst
+ SET [1+A], [MEM_FirstFreeBloc]
+ SET [MEM_FirstFreeBloc], A
+ ; and we proceed to consolidation...
+
+;
+; Consolidation
+;
+; Search for all adjacent free blocs
+; and reunites them
+;
+:MEM_Free_Consolidate_Internal
+ SET B,[MEM_FirstFreeBloc]
+
+:MEM_Free_ConsolidateLoop
+	SET I, [B] ; Getting the size
+	SET J, B
+	ADD J, I   ; End of bloc pointer
+	; if next bloc is that pointer
+	IFE J, [1+B]	SET PC, MEM_FreeJoinBlocs
+
+	SET B, [1+B] ; B = B->Next
+	; if not null, we loop
+	IFN B,0		SET PC, MEM_Free_ConsolidateLoop
+
+ ; no more consolidation found, we exit
+ JSR MEM_Unlock
+ SET PC, PopRet8
+
+:MEM_FreeJoinBlocs
+ SET X, [1+B]	; keeping B->Next
+ ADD [B], [X]	; B->Size += B->Next->Size
+ SET [1+B], [1+X] ; B->Next = B->Next->Next
+ ; we then restart the whole consolidation from B
+ SET PC, MEM_Free_ConsolidateLoop
+
+;=======================================
+
+; Anchor to the Free bloc linked list
+:MEM_FirstFreeBloc
+ dat 0x0
+

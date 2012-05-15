@@ -1,0 +1,135 @@
+;Description: Raining Green Code[Fixed]
+;Code Monkey: Jonathan "Nogard" Kernick
+
+.include "DEQOS_User.h16"
+
+.out "MATRIX.PRG"
+
+JSR [SYS_GetDisplayBuffer]
+SET [VideoRam], Z
+JSR [SYS_ClearScreen]
+
+set j, 0		; lineiterator
+set z, 3434		; text jiggle
+set y, 45		; number jiggle
+:start
+add j, 1
+mod j, 16
+add z, 1
+set i, 0
+
+;delays the screen updates
+:delay
+JSR [SYS_BlockIfRunningInBackground]
+set a,32
+JSR [SYS_Sleep]
+
+
+		
+:go
+set i, 0
+
+:loop
+SET PUSH, Z
+JSR [SYS_KeyboardGet]
+IFN Z,0	
+		SET PC, Exit
+SET Z, POP
+
+ife i,32
+set pc, start
+
+;set Textjiggle
+set y,i
+add y, [sequence+i]
+mul y, 160
+div y, 100
+
+mod y, 16
+mul y, 32
+
+set a, 32
+mul a, j
+add a, y
+mod a, 384
+
+add a, i
+
+set c, i
+mod c, 3
+add c, 1
+mul a, c
+mod a, 384
+
+JSR resetColour
+bor x, 0xF000		;	white with green text
+mod a, 384
+set b,[VideoRam]
+add b,a
+set [b], x
+
+	
+sub a, 32
+mod a, 384
+JSR resetColour
+bor x, 0xA000; black with green text
+mod a, 384
+set b,[VideoRam]
+add b,a
+set [b], x 
+
+sub a, 96
+mod a, 384
+JSR resetColour
+bor x, 0x2000; black with dar; green text
+mod a, 384
+set b,[VideoRam]
+add b,a
+set [b], x 
+
+sub a, 160
+mod a, 384
+JSR resetColour
+bor x, 0x0000; black 
+mod a, 384
+set b,[VideoRam]
+add b,a
+set [b], x 
+
+add i,1
+set PC, loop
+
+;sets resets the color of the forground and back ground to black
+:resetColour
+set x, i
+add x, j
+add x, z
+mod x, 26
+add x, 0x0041
+SET PC, POP
+
+:EXIT
+	SET Z, POP
+	JSR [SYS_ClearScreen]
+	SET A, Author
+	JSR [SYS_PrintStringNL]
+	SET A, PressKey
+	JSR [SYS_PrintStringNL]
+:waitkey
+	JSR [SYS_BlockIfRunningInBackground]
+	JSR [SYS_KeyBoardGet]
+	IFE Z,0
+		SET PC, waitkey
+	SET PC, POP
+	
+
+;sequence used to random up the drops
+:sequence
+dat 3,1,4,1,5,9,2,5,3,5,8,9,7,9,3,2,3,8,4,6,2,6,4,3,3,8,3,2,7,9,5,0,2,8,8,4,1,9,7,1,6,9,3,9,9,3,7,5,1,0,5,8,2,0,9,7,4,9,4,4
+
+:Author
+dat "Author:Jonathan 'Nogard' Kernick",0
+:PressKey
+dat "Press any key to exit",0
+:VideoRam
+dat 0

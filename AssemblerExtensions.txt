@@ -1,0 +1,39 @@
+VDCPU's assembler has a few extra commands
+
+#1
+	.def : Defines a litteral constant
+
+	Example:
+	---------
+	.def VIDEO_MEM 0x8000
+	SET A, [VIDEO_MEM+B]	is then equivalent to SET A, [0x8000+B]
+	
+#2
+	.include : Includes another source file.. Warning.. no cycling-include test yet.. ;)
+
+#3
+	.out : Defines the final program's filename (must be 6.3 format)
+	
+	Example :
+	----------
+	.out "SAMPLE.PRG"
+	
+#4
+	.Assert_Address : Triggers an error when assembling if the current address we're assembling doesn't match the parameter
+	Useful when you rely on some code/data to be located at a specific address
+	
+	Example :
+	----------
+	.assert_address 21
+	
+#5
+	.org / .end_org : Adds some litteral constant value to the address of symbols that are resolved in this region
+	this is mostly useful in Loader code, when you need to move some code at another location... 
+	
+#6
+
+	.no_relocation_table : Assembler won't output any relocation table for that program...
+	this should only be used for OS code, or code that you know will start at 0
+	
+
+	

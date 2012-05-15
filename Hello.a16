@@ -1,0 +1,16 @@
+; Assembler test for DCPU
+
+.include "DEQOS_User.h16"
+
+.out "HELLO.PRG"
+
+	SET A, data
+	JSR [SYS_PrintStringNL]
+	
+	SET PC, POP
+
+.include "stdlib.h16"
+
+:data
+	dat "Hello world, how are you?", 0
+

@@ -1,0 +1,297 @@
+
+;===================================
+; PushRegs8
+; Pushes ABCIJXYZ
+;===================================
+:PushAllRegs8
+ SET PUSH, A
+ SET PUSH, B
+ SET PUSH, C
+ SET PUSH, I
+ SET PUSH, J
+ SET PUSH, X
+ SET PUSH, Y
+ SET PUSH, Z
+ SET PC, PICK 8
+;===================================
+
+;===================================
+; PushRegs7
+; Pushes ABCIJXY
+;===================================
+:PushAllRegs7
+ SET PUSH, A
+ SET PUSH, B
+ SET PUSH, C
+ SET PUSH, I
+ SET PUSH, J
+ SET PUSH, X
+ SET PUSH, Y
+ SET PC, PICK 7
+;===================================
+
+;===================================
+; PushRegs6
+; Pushes ABCIJX
+;===================================
+:PushAllRegs6
+ SET PUSH, A
+ SET PUSH, B
+ SET PUSH, C
+ SET PUSH, I
+ SET PUSH, J
+ SET PUSH, X
+ SET PC, PICK 6
+;===================================
+
+;===================================
+; PushRegs5
+; Pushes ABCIJ
+;===================================
+:PushAllRegs5
+ SET PUSH, A
+ SET PUSH, B
+ SET PUSH, C
+ SET PUSH, I
+ SET PUSH, J
+ SET PC, PICK 5
+;===================================
+
+;===================================
+; PushRegs4
+; Pushes ABCI
+;===================================
+:PushAllRegs4
+ SET PUSH, A
+ SET PUSH, B
+ SET PUSH, C
+ SET PUSH, I
+ SET PC, PICK 4
+;===================================
+
+;===================================
+; PushRegs3
+; Pushes ABC
+;===================================
+:PushAllRegs3
+ SET PUSH, A
+ SET PUSH, B
+ SET PUSH, C
+ SET PC, PICK 3
+;===================================
+
+;===================================
+; PopRet :
+; Pops all regs, and return
+;===================================
+:PopRet8
+ SET Z, POP
+:PopRet7
+ SET Y, POP
+:PopRet6
+ SET X, POP
+:PopRet5
+ SET J, POP
+:PopRet4
+ SET I, POP
+:PopRet3
+ SET C, POP
+ SET B, POP
+ SET A, POP
+ ADD SP, 1 ; empty pop (return address from the JSR Push)
+ SET PC, POP
+
+
+;===================================
+; memset A = dest, B = value, C = size
+;===================================
+:memset
+	JSR PushAllRegs3
+	ADD C, A	; end for A
+	:memset_loop
+		SET [A], B
+		ADD A,1
+		IFN A, C
+			SET PC, memset_loop
+	SET PC, PopRet3
+	
+;========================================================
+; Sub32 : Y:Z = Y:Z - B:A
+;========================================================
+:Sub32
+	SUB Y,B
+	SUB Z,A
+	ADD Y,EX
+	SET PC,POP
+	
+;========================================================
+;Mul32By16 Multiplies a 32bit number by a 16bit one
+;Inputs:  B:A = Value
+;           C = Multiplicator
+;Outputs: Y:Z = Result
+;Changes:
+;NOTES: This is UNSIGNED multiplication !
+;========================================================
+:Mul32By16
+	SET Y, B
+	MUL Y, C
+	SET Z, A
+	MUL Z, C
+	ADD Y, EX
+	SET PC, POP
+
+;========================================================
+;Divide32By16 Divides a 32bit number by a 16bit one
+;Inputs:  B:A = Dividend
+;           X = Divisor
+;Outputs: Y:Z = Quotient
+;Changes:
+;NOTES: This is UNSIGNED division!
+;========================================================
+:Divide32By16
+
+.def D5 			0
+.def I2				1
+.def D6				2
+.def Divisor 		3
+.def I3				4
+.def I4				5
+.def Dividend_Hi 	6
+.def Dividend_Lo 	7
+.def G5		  		8
+.def H5				9
+.def D7				10
+.def NumVars 		11
+
+	JSR PushAllRegs6
+	IFE B,0
+		SET PC, Divide16
+	IFE X,0
+		SET PC, DivideInfinite
+	IFE X,1
+		SET PC, DivideNot
+		
+	; real 32 bit division
+	SUB SP, NumVars
+	
+	SET PICK Dividend_Hi, B
+	SET PICK Dividend_Lo, A
+	SET PICK Divisor, X
+	
+	SET PICK D5, PICK Dividend_Hi	; D5
+	DIV PICK D5, PICK Divisor	; d5 ok
+	SET PICK D6, PICK Dividend_Hi
+	MOD PICK D6, PICK Divisor	; d6 ok
+	SET PICK I2, 0xFFFF
+	DIV PICK I2, PICK Divisor	; i2 ok
+	SET PICK D7, PICK D6
+	MUL PICK D7, PICK I2		; d7 ok
+	SET PICK I3, PICK I2
+	MUL PICK I3, PICK Divisor	; i3 ok
+	SET PICK I4, 0
+	SUB PICK I4, PICK I3		; i4 ok
+	SET A, PICK D6
+	SET B, 0
+	SET C, PICK I4
+	JSR Mul32By16
+	
+	SET B, Y
+	SET A, Z
+	ADD A, PICK Dividend_Lo
+	ADD B, EX
+	SET X, PICK Divisor
+	JSR Divide32By16		; recurse
+	
+	SET PICK G5, Y
+	SET PICK H5, Z
+	
+	ADD PICK G5, PICK D5
+	ADD PICK H5, PICK D7
+	ADD PICK G5, EX
+	
+	SET Y, PICK G5
+	SET Z, PICK H5
+	
+	ADD SP,NumVars
+	SET PC, PopRet6
+  
+:Divide16
+	SET Y,0
+	SET Z,A
+	DIV Z,X
+	SET PC, PopRet6
+:DivideInfinite
+	SET Y,0xFFFF
+	SET Z,0xFFFF
+	SET PC, PopRet6
+:DivideNot
+	SET Y,B
+	SET Z,A
+	SET PC, PopRet6
+
+	
+;======================================
+; Gets time in Y(lo) Z(hi) in seconds
+;======================================
+:GetTimeInSeconds
+	SET PUSH,A
+	SET PUSH,B
+	SET PUSH,X
+	SET A, [Clock_msMuledBy3Lo]
+	SET B, [Clock_msMuledBy3Hi]
+	SET X, 3000
+	JSR Divide32By16
+	SET X,POP
+	SET B,POP
+	SET A,POP
+	SET PC,POP
+	
+;======================================
+; Gets time in Y(lo) Z(hi) in milliseconds
+;======================================
+:GetTimeInMilliseconds
+	SET PUSH,A
+	SET PUSH,B
+	SET PUSH,X
+	SET A, [Clock_msMuledBy3Lo]
+	SET B, [Clock_msMuledBy3Hi]
+	SET X, 3
+	JSR Divide32By16
+	SET X,POP
+	SET B,POP
+	SET A,POP
+	SET PC,POP
+
+;======================================
+; sleeps for 'A' milliseconds
+;======================================
+:Sleep
+	JSR PushAllRegs8
+	SET C, A
+	JSR GetTimeInMilliseconds
+	SET B, Y
+	SET A, Z
+:SleepLoop
+	JSR Sub32
+	IFG Z,C
+		SET PC,SleepEnd
+	INT IntMsg_Sleep ; try to schedule another thread until next tick
+	JSR GetTimeInMilliseconds
+	SET PC,SleepLoop
+:SleepEnd
+	SET PC,PopRet8
+	
+;===================================================
+; sleeps until current time (in ms) minus B:A == C
+;===================================================
+:FinishLoop
+	JSR PushAllRegs8
+:FinishLoopLoop
+	JSR Sub32
+	IFG Z,C
+		SET PC,FinishLoopEnd
+	INT IntMsg_Sleep ; try to schedule another thread until next tick
+	JSR GetTimeInMilliseconds
+	SET PC,FinishLoopLoop
+:FinishLoopEnd	
+	SET PC,PopRet8

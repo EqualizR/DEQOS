@@ -1,0 +1,204 @@
+;-----------------------------------------------------------------------------------
+; Predefined constants
+;-----------------------------------------------------------------------------------
+.out "DEQOS.SYS"	; Output filename
+.no_relocation_table
+
+
+.def VIDEO_NB_COLUMNS			32
+.def VIDEO_NB_LINES				12
+.def SIGN_BIT					0x8000
+
+.def KEYBOARD_BUFFER			0x9000
+.def KEYBOARD_BUFFER_END		0x9010
+.def SYS_COMMAND_END			0x9020
+
+.def STACK_END					0xf500
+
+.def ASCIICode_Backspace		0x10
+.def ASCIICode_Return			0x11
+.def ASCIICode_Space			32
+.def ASCIICode_Minus			45
+.def ASCIICode_0				48
+.def ASCIICode_9				57
+.def ASCIICode_A				65
+.def ASCIICode_F				70
+.def ASCIICode_N				78
+.def ASCIICode_Y				89
+.def ASCIICode_Z				90
+.def ASCIICode_Lower_a			97
+.def ASCIICode_Lower_z		   122
+
+;-----------------------------------------------------------------------------------
+; Computed Constants
+; As ASM doesn't support regular expressions in constants (yet) ... 
+.def VIDEO_MEM_SECONDLine 0x0020	; = 32
+.def VIDEO_MEM_LastLine	  0x0160	; = 32 * (VIDEO_NB_LINES-1)
+.def VIDEO_MEM_End		  0x0180	; = 32 * VIDEO_NB_LINES
+
+.def VID_LastColumn		  31		; = VIDEO_NB_COLUMNS - 1
+.def VID_LastLine		  11		; = VIDEO_NB_LINES - 1
+.def VIDEO_CHARSET_End	  0x0280	; = VIDEO_MEM_End + 128*2
+
+;-----------------------------------------------------------------------------------
+
+.include "DEQOS_ZFat.h16"
+
+;===================================
+; BOOT SECTION
+; assuming we just loaded this as
+; part of a boot sector
+;===================================
+ SET PC, Preinit ; 2 words
+
+; System Call Table
+; Allows external programs to access
+; exported OS functions
+; ! must start at 0x0002 !
+
+.assert_address 0x0002
+
+:SYS_KeyboardGet				dat KeyboardGet
+:SYS_SetCurrColor				dat SetCurrColor
+:SYS_GetCurrColor				dat GetCurrColor
+:SYS_NextLine					dat NextLine
+:SYS_ClearScreen				dat ClearScreen
+:SYS_GetCursorX					dat GetCursorX
+:SYS_GetCursorY					dat GetCursorY
+:SYS_SetCursorX					dat SetCursorX
+:SYS_SetCursorY					dat SetCursorY
+:SYS_DrawRect					dat DrawRect
+:SYS_ClipRect					dat ClipRect
+:SYS_PrintString				dat PrintString
+:SYS_PrintStringNL				dat PrintStringNL
+:SYS_PrintValueHex				dat PrintValueHex
+:SYS_PrintValueUnsigned			dat PrintValueUnsigned
+:SYS_PrintValueSigned			dat PrintValueSigned
+:SYS_MEM_GetTotalFreeMem		dat MEM_GetTotalFreeMem
+:SYS_MEM_Alloc					dat MEM_Alloc
+:SYS_MEM_Free					dat MEM_Free
+:SYS_ExecProgram				dat ZFAT_ExecProgram
+:SYS_RestoreCharacterTable		dat DEQOS_RestoreCharacterTable
+:Push8					        dat PushAllRegs8
+:Push7							dat PushAllRegs7
+:Push6							dat PushAllRegs6
+:Push5							dat PushAllRegs5
+:Push4							dat PushAllRegs4
+:Push3							dat PushAllRegs3
+:Ret3							dat PopRet3
+:Ret4							dat PopRet4
+:Ret5							dat PopRet5
+:Ret6							dat PopRet6
+:Ret7							dat PopRet7
+:Ret8							dat PopRet8
+:SYS_RevertColor				dat RevertCurrentColor
+:SYS_GetDisplayBuffer			dat GetDisplayBuffer
+:SYS_GetFontBuffer				dat GetFontBuffer
+:SYS_MutexCreate				dat DEQOS_CreateMutex
+:SYS_MutexLock					dat Mutex_Lock
+:SYS_MutexRelease				dat Mutex_Release
+:SYS_Mul32By16					dat Mul32By16
+:SYS_Divide32By16				dat Divide32By16
+:SYS_GetTimeInSeconds			dat GetTimeInSeconds
+:SYS_GetTimeInMilliseconds		dat GetTimeInMilliseconds
+:SYS_Sleep						dat Sleep
+:SYS_FinishLoop					dat FinishLoop	
+:SYS_BlockIfRunningInBackground dat DEQOS_BlockIfNotOnMyConsole						
+ 
+.assert_address 48 ; verifies the current address
+
+:GetDisplayBuffer
+	SET Z, [DisplayBuffer]
+	SET PC, POP
+	
+:GetFontBuffer
+	SET Z, [FontBuffer]
+	SET PC, POP
+	
+:DisplayBuffer	dat 0x7000
+:FontBuffer		dat 0x7180
+
+
+;===================================
+;Preinit code :
+; Initializes early stuff
+;===================================
+:STR_Initializing
+ dat "Init ",0
+:STR_Done
+ dat "done",0
+
+:Preinit
+  ; initializing the disk drive mutex
+  SET [ZFAT_Mutex],   1
+  SET [ZFAT_Mutex_ListCount], 0
+  
+  ; Initializes all devices..
+  JSR DEV_InitDevices
+ 
+  ; here we do the display intialization
+  JSR InitDisplay
+
+  SET A, STR_Initializing
+  JSR [SYS_PrintString]
+
+  ; memory manager
+  JSR MEM_Init
+
+  SET A, STR_Done
+  JSR [SYS_PrintStringNL]
+
+  SET PUSH, DEQOS_LaunchConsoles ; multi tasking initialization
+  SET PC, About ; calls "About" and then DEQOS_LaunchConsoles
+  
+;===================================
+;===================================
+
+;===================================
+; Reads the OS from disk
+;===================================
+:STR_OSSIZE
+ dat "Kernel size : ",0
+:STR_MemAvail
+ dat "Free Memory : ",0
+:STR_Words
+ dat " words",0
+:STR_Banner1
+ dat "------------------------",0
+:STR_Banner2
+ dat "      ** D-EQOS **      ",0
+:STR_Banner3
+ dat "       Version 0.9      ",0
+:STR_Banner4
+ dat " (C) 1988 DEQOS-Systems ",0
+
+:STR_Prompt
+ dat "READY",0
+:STR_Prompt2
+ dat ">",0
+:STR_SyntaxError
+  dat "*SYNTAX ERROR*",0
+:STR_NoDisk
+  dat "*NO DISK in drive",0
+:STR_FileNotFound
+  dat "*File Not Found: ",0
+:STR_FormatConfirm
+  dat "SURE, FORMAT?[Y/N]",0
+:STR_Formatting
+  dat "not supported yet ;-)",0
+
+.include "DEQOS_Devices.a16"
+.include "DEQOS_Mem.a16"
+.include "DEQOS_Shell.a16"
+.include "DEQOS_Draw.a16"
+.include "DEQOS_ZFat.a16"
+.include "DEQOS_Task.a16"
+.include "DEQOS_Utils.a16"
+
+; MUST BE AT THE VERY END OF THE OS CODE
+; This marks the start of the Heap
+; any code/data after this will get
+; overwritten
+:MEM_HeapStart
+ dat 0x0000
+

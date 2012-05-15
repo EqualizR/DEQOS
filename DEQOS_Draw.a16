@@ -1,0 +1,552 @@
+:Cursor_X
+ dat 0x0
+:Cursor_Y
+ dat 0x0
+:CurrentColor
+ dat 0x0
+
+
+:GetCursorX
+ SET Z,[Cursor_X]
+ SET PC,POP
+:GetCursorY
+ SET Z,[Cursor_Y]
+ SET PC,POP
+:SetCursorX
+ SET [Cursor_X], A
+ SET PC,POP
+:SetCursorY
+ SET [Cursor_Y], A
+ SET PC,POP
+
+:InitDisplay
+  JSR DEQOS_RestoreCharacterTable
+  SET [CurrentColor], 0x8000 ; default gray on black color
+  JSR ClearScreen
+  SET [Cursor_X], 0
+  SET [Cursor_Y], 0
+  SET PC, POP
+  
+:NextLine
+ JSR EraseCursor
+ SET [Cursor_X],0
+ ADD [Cursor_Y],1
+ IFG VIDEO_NB_LINES,[Cursor_Y]	SET PC, DrawCur
+ SUB [Cursor_Y],1
+ SET PC, ScrollScreen
+
+:RevertCurrentColor
+  SET PUSH, I
+  SET PUSH, C
+  SET C, [CurrentColor]
+  SET I,C
+  SHR C,4
+  SHL I,4
+  BOR C,I
+  AND C, 0xFF00
+  SET [CurrentColor],C
+  SET C, POP
+  SET I, POP
+  SET PC, POP
+
+:DrawPrompt
+  JSR PushAllRegs4
+  SET B, [CurrentColor]
+  JSR RevertCurrentColor
+  SET A, STR_Prompt
+  JSR PrintString
+  SET [CurrentColor],B
+  SET A,STR_Prompt2
+  SET PUSH, PopRet4		; fake JSR and PopRet4
+  SET PC,PrintString
+  
+
+:DrawCur
+ ;JSR DrawCursor
+ ;SET PC, POP
+ SET PC, DrawCursor
+ 
+
+:ScrollScreen
+ JSR PushAllRegs5
+ SET PUSH, Z
+ JSR GetDisplayBuffer
+ SET I, Z ; VIDEO_MEM_START
+ SET J, Z
+ ADD J, VIDEO_MEM_SECONDLine
+ SET C, Z
+ ADD C, VIDEO_MEM_LastLine
+ 
+:ScrollScreenLoop
+	STI [I], [J]
+	STI [I], [J]
+	STI [I], [J]
+	STI [I], [J]
+	STI [I], [J]
+	STI [I], [J]
+	STI [I], [J]
+	STI [I], [J]
+	IFN I, C	SET PC, ScrollScreenLoop
+  
+ ; now must erase the last line
+ SET C, VIDEO_MEM_End
+ ADD C, [DisplayBuffer]
+ SET B,[CurrentColor]
+ 
+:ScrollScreenLastLine
+	STI [I],B
+	IFN I, C	SET PC, ScrollScreenLastLine
+
+ SET Z, POP
+
+ ;JSR DrawCursor
+ ;SET PC, PopRet5
+ ; optimized to : 
+ SET PUSH, PopRet5
+ SET PC, DrawCursor
+
+;===================================
+;About
+;===================================
+:About
+  SET PUSH, [CurrentColor]
+  
+  JSR [SYS_NextLine] ; Pre-scrolling if necessary
+  JSR [SYS_NextLine]
+  JSR [SYS_NextLine]
+  JSR [SYS_NextLine]
+  JSR [SYS_NextLine]
+  SUB [Cursor_Y],5	 ; Going back 5 lines up
+  JSR RevertCurrentColor
+  SET A, STR_Banner1
+  JSR [SYS_PrintStringNL]
+  SET A, STR_Banner2
+  JSR [SYS_PrintStringNL]
+  SET A, STR_Banner3
+  JSR [SYS_PrintStringNL]
+  SET A, STR_Banner4
+  JSR [SYS_PrintStringNL]
+  SET A, STR_Banner1
+  JSR [SYS_PrintStringNL]
+  
+  SET [CurrentColor], POP
+  SET PC, POP
+
+
+;===================================
+; SetCurrColor
+;===================================
+:SetCurrColor
+  SET [CurrentColor], C
+  AND [CurrentColor], 0xFF00
+  SET PC, POP
+;===================================
+
+;===================================
+; GetCurrColor
+;===================================
+; Returns current color in Z
+;===================================
+:GetCurrColor
+  SET Z, [CurrentColor]
+  SET PC, POP
+;===================================
+
+:STR_CursorChar
+ dat 0xdf,0 	; blinking '_'
+
+:STR_NoCursorChar
+ dat " ",0
+
+:DrawCursor
+ SET PUSH, A
+ SET PUSH, [Cursor_X]
+ SET A, STR_CursorChar
+ JSR [SYS_PrintString]
+ SET [Cursor_X],POP
+ SET A,  POP
+ SET PC, POP
+
+:EraseCursor
+ SET PUSH, A
+ SET PUSH, [Cursor_X]
+ SET A, STR_NoCursorChar
+ JSR [SYS_PrintString]
+ SET [Cursor_X], POP
+ SET A, POP
+ SET PC, POP
+
+;===================================
+; ClearScreen
+;===================================
+; Clears the screen with current color
+;===================================
+:ClearScreen
+  JSR PushAllRegs5
+  SET PUSH, Z
+  JSR GetDisplayBuffer
+  SET A, Z
+  ADD A, VIDEO_MEM_End
+  SET C, [CurrentColor]
+  BOR C, 0x20
+  SET I, Z
+  :CLS_Loop1
+	   STI [I], C
+	   STI [I], C
+	   STI [I], C
+	   STI [I], C
+	   STI [I], C
+	   STI [I], C
+	   STI [I], C
+	   STI [I], C
+	   IFN I, A	
+			SET PC, CLS_Loop1
+   SET Z, POP
+   SET PC, PopRet5
+;===================================
+
+;===================================
+; DrawRect
+;===================================
+; SET X, Left
+; SET Y, Top
+; SET A, Width
+; SET B, Height
+;===================================
+:DrawRect
+  JSR PushAllRegs8
+
+  SET C, [CurrentColor]
+
+  ; Performing clipping
+  JSR ClipRect
+
+  ; Null width or height ?
+  IFE A, 0		SET PC, PopRet8
+  IFE B, 0		SET PC, PopRet8
+  
+  ; Top or left outside the screen ?
+  IFG X, VID_LastColumn		SET PC, PopRet8
+  IFG Y, VID_LastLine		SET PC, PopRet8
+
+  SET I, VIDEO_NB_COLUMNS    ; 32 chars per line
+  MUL I, Y     ; Y offset on screen
+  ADD I, X     ; adding the X offset
+:DrawRect_L2
+  SET Z, I     ; start line address
+  ADD Z, A     ; end of line address
+  
+  SET J, I
+  
+  SET PUSH, Y
+  SET PUSH, Z
+  JSR GetDisplayBuffer
+  SET Y, Z
+  SET Z, POP
+  ADD Y, I ;  y = VIDEO_MEM_START + I
+:DrawRect_L1
+  SET [Y], C
+  ADD I, 1
+  ADD Y, 1
+  IFN I, Z		SET PC, DrawRect_L1
+  SET Y, POP
+:DrawRect_L1End
+  SUB B, 1     ; dec NbLines
+  IFE B, 0		SET PC, PopRet8
+  ADD I, VIDEO_NB_COLUMNS  ; adding "one line - A"
+  SUB I, A
+  SET PC, DrawRect_L2
+:DrawRect_Done
+  SET PC, PopRet8
+;-------------------------------------------
+
+
+;===================================
+; ClipRect
+;===================================
+; SET X, Left
+; SET Y, Top
+; SET A, Width
+; SET B, Height
+;===================================
+:ClipRect
+  SET PUSH, I
+
+  ADD X, SIGN_BIT          ; moving 0 to 0x8000
+  ADD Y, SIGN_BIT          ; to deal with negative values
+
+  ; X Clipping
+  ; positive ?
+  IFG X, 0x7fff		SET PC, NoClipLeft
+  SET I, SIGN_BIT		   ; negative part is 0x8000 - X (for instance 0x8000 - 0x7ffe = 2)
+  SUB I, X			
+  SET X, SIGN_BIT			; New X = 0x8000
+  SUB A, I					; New Size = A - 2 (in this example)
+  ; Width < 0 ?
+  IFN EX, 0			SET PC, ClipRect_NullRect
+:NoClipLeft
+
+  ; Y Clipping
+  ; positive ?
+  IFG Y, 0x7fff		SET PC, NoClipTop
+  SET I, SIGN_BIT
+  SUB I, Y
+  SET Y, SIGN_BIT
+  SUB B, I
+  ; height < 0 ?
+  IFN EX, 0			SET PC, ClipRect_NullRect
+  
+:NoClipTop
+
+  SUB X, SIGN_BIT	; going back to the 0..ffff range
+  SUB Y, SIGN_BIT
+
+  SET I, X
+  ADD I, A
+  IFG VIDEO_NB_COLUMNS, I		SET PC, ClipRectX
+  SET A, VIDEO_NB_COLUMNS
+  SUB A, X
+:ClipRectX
+  SET I, Y
+  ADD I, B
+  IFG VIDEO_NB_LINES, I			SET PC, ClipRectY
+  SET B, VIDEO_NB_LINES
+  SUB B, Y
+:ClipRectY        ; Return
+  SET I, POP
+  SET PC,POP
+:ClipRect_NullRect
+  SET A,0
+  SET PC, ClipRectY
+;===================================
+
+;===================================
+; bOnScreenX
+;===================================
+; input : X
+; output Z = 1 if onscreen, Z = 0 if out
+;===================================
+:bOnScreenX
+  SET Z, 1
+  ; either X > 31 or X < 0 (then X between 0x8000 and 0xFFFF)
+  IFG X, VID_LastColumn		SET Z, 0
+  SET PC, POP
+;===================================
+
+;===================================
+; bOnScreenY
+;===================================
+; input : Y
+; output Z = 1 if onscreen, Z = 0 if out
+;===================================
+:bOnScreenY
+  SET Z, 1
+  IFG Y, VID_LastLine	SET Z, 0
+  SET PC, POP
+;===================================
+
+;===================================
+; PrintString
+;===================================
+;SET A, string
+;===================================
+:PrintString
+ JSR PushAllRegs8 ; do not modify
+:PrintStringInternal
+
+ SET X, [Cursor_X]
+ SET Y, [Cursor_Y]
+ SET C, [CurrentColor]
+ AND C, 0xFF00
+ 
+ JSR GetDisplayBuffer
+ 
+ ; Basic Y rejection
+ IFG Y, VID_LastLine		SET PC, PopRet8
+ MUL Y, VIDEO_NB_COLUMNS
+
+:PrintStringL1
+  SET B, [A]
+  AND B, 0xFF
+  IFE B,0					SET PC, PopRet8
+  
+  ; X Negative or > 31
+  IFG X, VID_LastColumn		SET PC, PrintStringCharClipped
+  SET J, Y
+  ADD J, X
+  BOR B, C
+  SET I, J	; curr char
+  ADD I, Z	; video mem start
+  SET [I], B     ; Drawing
+  ADD [Cursor_X],1
+:PrintStringCharClipped
+  ADD A, 1
+  ADD X, 1
+  SET PC, PrintStringL1
+;===================================
+
+:PrintStringNL
+ JSR PrintString
+ SET PC, NextLine
+
+;:TempPrintBuffer
+; dat "0123456789",0
+
+;===================================
+; PrintValueHex
+;===================================
+;SET A, Value to draw
+;===================================
+:PrintValueHex
+ JSR PushAllRegs8
+
+  SUB SP, 12 ; reserving space for tempstring
+  SET Y, SP
+
+  ; example : A = 0x1234
+  SET B, A
+  SHR B, 12            ; B = 0x0001
+  JSR PrintNibble
+  SET B, A
+  SHR B, 8             ; B = 0x0012
+  AND B, 0xF           ; B = 0x0002
+  JSR PrintNibble
+  SET B, A
+  SHR B, 4             ; B = 0x0123
+  AND B, 0xF           ; B = 0x0003
+  JSR PrintNibble
+  SET B, A
+  AND B, 0xF           ; B = 0x0004
+  JSR PrintNibble
+
+ SET [Y],0
+ SET A, SP
+ JSR PrintString
+ 
+ ADD SP, 12
+ SET PC, PopRet8
+
+:PrintNibble
+; 7 = 'A' - '9' in ASCII
+ IFG B,9	ADD B,7
+ ADD B, ASCIICode_0
+ SET [Y], B
+ ADD Y, 1
+ SET PC,POP
+;------------------------------------------------
+
+
+;===================================
+; PrintValueUnsigned
+;===================================
+;SET A, data
+;===================================
+:PrintValueUnsigned
+  JSR PushAllRegs8
+  
+  SUB SP, 12	; space for tempstring
+
+  SET Y, SP
+  ADD Y, 4       ; starting on the last digit
+  SET [1+Y],0    ; terminate the string
+  SET Z,0
+
+:PrintRegUIntDigitLoop
+  SET I, A
+  MOD I,10       ; Getting last digit
+  ADD I, ASCIICode_0       ; getting its ASCII code
+  SET [Y],I      ; writing on screen
+  SUB Y,1
+  ADD Z,1        ; Displayed digit counter
+  DIV A,10       ; Remaining to display
+  IFN A,0	SET PC,PrintRegUIntDigitLoop
+
+  ADD Y,1
+  SET A,Y
+  JSR PrintString
+  
+  ADD SP, 12
+  SET PC, PopRet8
+;===================================
+
+
+;===================================
+; PrintValueSigned
+;===================================
+;SET A, data
+;===================================
+:PrintValueSigned
+  JSR PushAllRegs8
+  SUB SP, 12
+  
+  SET Y, SP
+  ADD Y, 5       ; starting on the last digit
+  SET [1+Y],0
+
+  IFG SIGN_BIT, A	SET PC, PrintRegIntPositive
+
+  SET X,0        ; Must display '-'
+  XOR A, 0xFFFF  ; to retrieve the positive value
+  ADD A, 1
+  SET PC, PrintRegIntDigitLoop
+
+:PrintRegIntPositive
+  SET X,1        ; Don't display '-'
+
+:PrintRegIntDigitLoop
+  SET I, A
+  MOD I,10       ; Getting last digit
+  ADD I,ASCIICode_0       ; getting its ASCII code
+  SET [Y],I      ; writing on buffer
+  SUB Y,1		 ; Going to previous digit
+  DIV A,10       ; Remaining to display
+  
+  IFN A,0	SET PC, PrintRegIntDigitLoop
+
+  ; now displaying the sign
+  IFE X,1 SET PC, PrintRegInt_DontDrawMinus
+  
+  SET [Y], ASCIICode_Minus	; = "-"
+  SUB Y, 1
+:PrintRegInt_DontDrawMinus
+  ADD Y, 1
+  SET A, Y
+  JSR PrintString
+  
+  ADD SP, 12
+  SET PC, PopRet8
+;===================================
+
+;--------------------------------------------------
+; Font table
+;--------------------------------------------------
+:DEQOS_DefaultCharacterTable
+	dat 0x0000,0x0000,0x080f,0x0808,0x08f8,0x0808,0x00ff,0x0808,0x0808,0x0808,0x08ff,0x0808,0x00ff,0x1414,0xff00,0xff08,0x1f10,0x1714,0xfc04,0xf414,0x1710,0x1714,0xf404,0xf414,0xff00,0xf714,0x1414,0x1414,0xf700,0xf714,0x1417,0x1414
+	dat 0x0f08,0x0f08,0x14f4,0x1414,0xf808,0xf808,0x0f08,0x0f08,0x001f,0x1414,0x00fc,0x1414,0xf808,0xf808,0xff08,0xff08,0x14ff,0x1414,0x080f,0x0000,0x00f8,0x0808,0xffff,0xffff,0xf0f0,0xf0f0,0xffff,0x0000,0x0000,0xffff,0x0f0f,0x0f0f
+	dat 0x0000,0x0000,0x005f,0x0000,0x0300,0x0300,0x3e14,0x3e00,0x266b,0x3200,0x611c,0x4300,0x3629,0x7650,0x0002,0x0100,0x1c22,0x4100,0x4122,0x1c00,0x2a1c,0x2a00,0x083e,0x0800,0x4020,0x0000,0x0808,0x0800,0x0040,0x0000,0x601c,0x0300
+	dat 0x3e41,0x3e00,0x427f,0x4000,0x6259,0x4600,0x2249,0x3600,0x0f08,0x7f00,0x2745,0x3900,0x3e49,0x3200,0x6119,0x0700,0x3649,0x3600,0x2649,0x3e00,0x0024,0x0000,0x4024,0x0000,0x0814,0x2241,0x1414,0x1400,0x4122,0x1408,0x0259,0x0600
+	dat 0x3e59,0x5e00,0x7e09,0x7e00,0x7f49,0x3600,0x3e41,0x2200,0x7f41,0x3e00,0x7f49,0x4100,0x7f09,0x0100,0x3e49,0x3a00,0x7f08,0x7f00,0x417f,0x4100,0x2040,0x3f00,0x7f0c,0x7300,0x7f40,0x4000,0x7f06,0x7f00,0x7f01,0x7e00,0x3e41,0x3e00
+	dat 0x7f09,0x0600,0x3e41,0xbe00,0x7f09,0x7600,0x2649,0x3200,0x017f,0x0100,0x7f40,0x7f00,0x1f60,0x1f00,0x7f30,0x7f00,0x7708,0x7700,0x0778,0x0700,0x7149,0x4700,0x007f,0x4100,0x031c,0x6000,0x0041,0x7f00,0x0201,0x0200,0x8080,0x8000
+	dat 0x0001,0x0200,0x2454,0x7800,0x7f44,0x3800,0x3844,0x2800,0x3844,0x7f00,0x3854,0x5800,0x087e,0x0900,0x4854,0x3c00,0x7f04,0x7800,0x447d,0x4000,0x2040,0x3d00,0x7f10,0x6c00,0x417f,0x4000,0x7c18,0x7c00,0x7c04,0x7800,0x3844,0x3800
+	dat 0x7c14,0x0800,0x0814,0x7c00,0x7c04,0x0800,0x4854,0x2400,0x043e,0x4400,0x3c40,0x7c00,0x1c60,0x1c00,0x7c30,0x7c00,0x6c10,0x6c00,0x4c50,0x3c00,0x6454,0x4c00,0x0836,0x4100,0x0077,0x0000,0x4136,0x0800,0x0201,0x0201,0x704c,0x7000
+
+:DEQOS_RestoreCharacterTable
+	JSR PushAllRegs5
+	SET I, [FontBuffer]
+	SET J, DEQOS_DefaultCharacterTable
+	SET C, 0x100
+	ADD C, I
+	
+	:DEQOS_RestoreFontTableLoop
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		IFN I, C
+			SET PC, DEQOS_RestoreFontTableLoop
+	SET PC, POPRet5
+	

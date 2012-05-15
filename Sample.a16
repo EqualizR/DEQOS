@@ -1,0 +1,68 @@
+; Assembler test for DCPU
+
+
+.include "DEQOS_User.h16"
+
+.out "SAMPLE.PRG"
+
+	JSR [SYS_GetCurrColor]		; saving Current color in reg B
+	SET B, Z
+	
+	SET C, 0x6000				; setting orange on black
+	JSR [SYS_SetCurrColor]		
+	
+	SET A, STR_1				; printing all the strings
+	JSR [SYS_PrintStringNL]
+	SET A, STR_2
+	JSR [SYS_PrintStringNL]
+	SET A, STR_3
+	JSR [SYS_PrintStringNL]
+	SET A, STR_4
+	JSR [SYS_PrintStringNL]
+	SET A, STR_5
+	JSR [SYS_PrintStringNL]
+	
+	SET C, B					; restoring current color
+	JSR [SYS_SetCurrColor]
+	
+	JSR WaitKey					; waiting for the user to press a key
+	
+	SET A, STR_Hello			; Launching "HELLO.PRG"
+	JSR [SYS_ExecProgram]
+	
+	SET C, 0x6000				; Setting back the color to Orange on black
+	JSR [SYS_SetCurrColor]
+	
+	SET A, STR_6				; printing the string
+	JSR [SYS_PrintStringNL]
+	
+	JSR WaitKey					; waiting a key
+	
+	SET C, B					; restoring current color
+	JSR [SYS_SetCurrColor]
+	
+	SET PC,POP					; Returning to the system
+	
+:WaitKey
+	JSR [SYS_BlockIfRunningInBackground]
+	JSR [SYS_KeyboardGet]
+	IFE Z,0			SET PC, WaitKey
+	SET PC, POP
+
+:STR_1
+	dat "Hello, this is a User Program", 0
+:STR_2
+	dat "I have been loaded by the OS", 0
+:STR_3
+	dat "from disk, remapped, and then",0
+:STR_4
+	dat "Executed.",0
+:STR_5
+	dat "Press key to launch HELLO.PRG",0
+:STR_6
+	dat "Press any key to return to OS",0
+:STR_Hello
+	dat "HELLO.PRG",0
+	
+	
+
