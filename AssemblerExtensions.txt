@@ -1,4 +1,4 @@
-VDCPU's assembler has a few extra commands
+DCPUStation's assembler has a few extra commands
 
 #1
 	.def : Defines a litteral constant
