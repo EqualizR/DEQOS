@@ -407,9 +407,10 @@
 	SET PUSH, B
 	JSR B
 	JSR [SYS_RestoreCharacterTable]
-	SET B, POP
-	SET A, B
+	SET A, POP
 	JSR MEM_Free
+	
+	JSR DEQOS_RestorePalette
 	
 	SET A,8
 	JSR DEQOS_SetThreadPriority

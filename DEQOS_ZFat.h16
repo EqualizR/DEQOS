@@ -46,8 +46,8 @@
 .def ZFAT_FILEEntry_FirstSector_Offset	6	
 .def ZFAT_FILEEntry_FirstSector_Size	1	; 1 word = first sector for this file
 
-.def ZFAT_SectorBufferMemory		0x8300	;
-.def ZFAT_SectorBuffer_SystemSize	0x8301  ; when loading DEQOS.SYS, first word = system file size
+.def ZFAT_SectorBufferMemory		0xf970	;
+.def ZFAT_SectorBuffer_SystemSize	0xf971  ; when loading DEQOS.SYS, first word = system file size
 .def ZFAT_SectorSize				0x0200	; 512 words
-.def ZFAT_SectorBufferEnd			0x8500
+.def ZFAT_SectorBufferEnd			0xFB70
 

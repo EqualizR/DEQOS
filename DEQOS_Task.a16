@@ -20,8 +20,9 @@
 .def Proc_ProgramBloc	21		; Mem bloc for code			= 1 wd
 .def Proc_BasePriority  22		; Base priority for thread	= 1 wd
 .def Proc_CurrentPrio	23		; Current priority			= 1 wd
-.def Proc_ConsoleNumber 24		
-.def Proc_SizeOf		25
+.def Proc_ConsoleNumber 24	
+.def Proc_PaletteBuffer 25		; Buffer for palette	
+.def Proc_SizeOf		26
 ;====================================================================
 
 .macro Px_VideoBuffer(register) { [12+register] }
@@ -46,8 +47,9 @@
 ;====================================================================
 .def Console_VideoMem  		0	; pointer to console's video memory
 .def Console_FontMem		1	; pointer to console's font memory
-.def Console_ActivationMutex 2	; pointer to console's mutex for activation
-.def Console_SizeOf			3
+.def Console_PaletteMem		2
+.def Console_ActivationMutex 3	; pointer to console's mutex for activation
+.def Console_SizeOf			4
 
 
 :DEQOS_ConsoleArray				; array of all the consoles
@@ -91,6 +93,7 @@
 	; using the system's display and font buffers
 	SET [Console_VideoMem+X], [DisplayBuffer]
 	SET [Console_FontMem+X], [FontBuffer]
+	SET [Console_PaletteMem+X], [PaletteBuffer]
 	SET A, X
 	JSR DEQOS_AddConsole	; adding the console
 	
@@ -106,7 +109,7 @@
 		SET [Console_ActivationMutex + X], Z
 		
 		; allocating display and font buffers in one bloc
-		SET A, VIDEO_CHARSET_End	
+		SET A, VID_TotalVideoSize	
 		JSR MEM_Alloc
 		
 		; setting the display and font pointers
@@ -115,6 +118,11 @@
 		SET [Console_FontMem+X], Z
 		; initializes the font buffer with default font
 		JSR DEQOS_InitFont
+		
+		ADD Z, VID_FontSize
+		SET [Console_PaletteMem+X], Z
+		JSR DEQOS_InitPalette
+		
 		
 		SET A, X
 		JSR DEQOS_AddConsole	; adding the console
@@ -174,6 +182,23 @@
 	
 	SET PC, POPRet5
 
+:DEQOS_InitPalette
+	JSR PushAllRegs5
+	SET I, Z
+	SET J, DEQOS_DefaultPalette
+	SET C, 0x10
+	ADD C, I
+	
+	:DEQOS_InitPaletteLoop	; 4x unroll for little speed up
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		STI [I], [J]
+		IFN I, C
+			SET PC, DEQOS_InitPaletteLoop
+	
+	SET PC, POPRet5
+	
 ;====================================================================
 ; CreateConsoleTask :
 ;	Creates the task associated to a given console
@@ -203,6 +228,7 @@
 	
 	SET [Proc_VideoBuffer+X], [Console_VideoMem+Y]	; Setting the task's display
 	SET [Proc_CharTable+X], [Console_FontMem+Y]		; and font buffers
+	SET [Proc_PaletteBuffer+X], [Console_PaletteMem+Y]
 	SET Y, POP
 	
 	SET [Proc_BasePriority+X], 8					; initial priorities
@@ -299,6 +325,7 @@
 	SET [Proc_CursorY+B],     [Cursor_Y]
 	SET [Proc_VideoBuffer+B], [DisplayBuffer]
 	SET [Proc_CharTable+B],   [FontBuffer]
+	SET [Proc_PaletteBuffer+B], [PaletteBuffer]
 	SET [Proc_Color+B],       [CurrentColor]
 	SET [Proc_SP+B], SP
 	
@@ -332,6 +359,7 @@
 	SET [Cursor_Y], 		[Proc_CursorY+A]
 	SET [DisplayBuffer], 	[Proc_VideoBuffer+A]
 	SET [FontBuffer], 		[Proc_CharTable+A]
+	SET [PaletteBuffer],	[Proc_PaletteBuffer+A]
 	SET [CurrentColor], 	[Proc_Color+A]
 
 	; restoring registers, and PC (that will resume the task)
@@ -379,6 +407,8 @@
 	SET A, NELEM1802_MEM_MAP_SCREEN 	SET B, [Console_VideoMem+X]
 	HWI [LEM1802_ID]
 	SET A, NELEM1802_MEM_MAP_FONT 		SET B, [Console_FontMem+X]
+	HWI [LEM1802_ID]
+	SET A, NELEM1802_MEM_MAP_PALETTE	SET B, [Console_PaletteMem+X]
 	HWI [LEM1802_ID]
 	
 	; re-activated tasks that were blocked because they were out of focus.
@@ -527,6 +557,7 @@
 	; unnecessary :
 	; SET [Proc_VideoBuffer+X], 0
 	; SET [Proc_CharTable+X],   0
+	; SET [Proc_PaletteBuffer+X], 0
 	; SET [Proc_Color+X], 0x8000
 	
 	SET [Proc_BasePriority+X], 0xFF00	; very very very low priority

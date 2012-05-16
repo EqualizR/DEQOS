@@ -72,3 +72,6 @@
 .def SYS_BlockWhenOutOfFocus	0x002F	; sleeps until the process' own console is activated
 .def SYS_BlockIfRunningInBackground 0x002F ; same as SYS_BlockWhenOutOfFocus
 
+.def SYS_GetPaletteBuffer		0x0030
+.def SYS_RestoreDefaultPalette	0x0031
+

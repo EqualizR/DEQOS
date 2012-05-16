@@ -40,8 +40,9 @@
 	SET [SchedulerReady], 0
 	
 	; Inits Keyboard buffer
-	SET I,0x9000
-	SET C, 0x9010
+	SET I, KEYBOARD_BUFFER
+	SET C, KEYBOARD_BUFFER
+	ADD C, 0x10
 	:FillKeyboardBuffer
 		STI [I],0
 		IFN I, C	
@@ -105,6 +106,10 @@
 	SET B, [FontBuffer]
 	HWI [LEM1802_ID]
 	
+	SET A, NELEM1802_MEM_MAP_PALETTE
+	SET B, [PaletteBuffer]
+	HWI [LEM1802_ID]
+	
 	SET A, NELEM1802_MEM_SET_BORDER_COLOR
 	SET B, 1
 	HWI [LEM1802_ID]
@@ -158,7 +163,7 @@
 	RFI A	; Returns from interrupt
 
 :Keyboard_BufferIndex
-	dat 0x9000
+	dat KEYBOARD_BUFFER
 	
 ;===================================
 ; KeyboardGet
@@ -177,7 +182,8 @@
 	IFE Z,0	SET PC, KeyboardGetDone
 	SET [A], 0
 	ADD A, 1
-	AND A, 0xF00F ; keeping the 9 and the last nibble
+	IFE A, KEYBOARD_BUFFER_END
+		SET A, KEYBOARD_BUFFER
 	SET [KeyboardRingIndex], A
 :KeyboardGetDone	
 	SET A, POP
@@ -209,9 +215,8 @@
 		SET PC, INT_KeyEnd
 	SET [B], C
 	ADD [Keyboard_BufferIndex], 1
-	AND [Keyboard_BufferIndex], 0x900F
-	
-	
+	IFE [Keyboard_BufferIndex], KEYBOARD_BUFFER_END
+		SET [Keyboard_BufferIndex], KEYBOARD_BUFFER
 	
 :INT_KeyEnd
 	SET B, POP

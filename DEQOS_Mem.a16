@@ -30,12 +30,10 @@
  ; memory layout is :
  ; [this code]
  ; [BLOC1]
- ; [VideoMem]
+ ; [Keyboard]
  ; [BLOC2]
  ; [Sector Buffer]
- ; [BLOC3]
- ; [Keyboard]
- ; [BLOC4]
+ ; [VideoMem]
  ; [Stack]
 
 	 SET [MEM_FirstFreeBloc], 0;
@@ -46,26 +44,16 @@
 	 ; SET A, Begining of the free bloc
 	 ; SET [A], End of the bloc
 	 ; JSR MEM_CreateAvailableBloc
+
 	 
 	 SET A,   MEM_HeapStart
-	 SET [A], [DisplayBuffer]
-	 JSR MEM_CreateAvailableBloc
-	 
-	 ; ## VIDEO_CHARSET_End --> ZFAT_SectorBufferMemory
-	 SET  A, VIDEO_CHARSET_End ; End of video memory
-	 ADD  A, [DisplayBuffer]
-	 SET [A], ZFAT_SectorBufferMemory
-	 JSR MEM_CreateAvailableBloc
-	 
-	 ; ## ZFAT_SectorBufferEnd --> KEYBOARD_BUFFER 
-	 SET  A, ZFAT_SectorBufferEnd  ; End of video memory
 	 SET [A], KEYBOARD_BUFFER
 	 JSR MEM_CreateAvailableBloc
 	 
-	 ; ## SYS_COMMAND_END -> STACK_END
-	 SET  A, SYS_COMMAND_END  ; next bloc
-	 SET [A], STACK_END
-	 JSR MEM_CreateAvailableBloc
+	 ; ## SYS_COMMAND_END -> SectorBuffer
+	 ;SET  A, SYS_COMMAND_END  ; next bloc
+	 ;SET [A], ZFAT_SectorBufferMemory
+	 ;JSR MEM_CreateAvailableBloc
 
 	 SET PC, PopRet8
  

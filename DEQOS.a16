@@ -9,11 +9,11 @@
 .def VIDEO_NB_LINES				12
 .def SIGN_BIT					0x8000
 
-.def KEYBOARD_BUFFER			0x9000
-.def KEYBOARD_BUFFER_END		0x9010
-.def SYS_COMMAND_END			0x9020
+.def KEYBOARD_BUFFER			0xF960
+.def KEYBOARD_BUFFER_END		0xF970
 
-.def STACK_END					0xf500
+
+.def STACK_END					0xfE00
 
 .def ASCIICode_Backspace		0x10
 .def ASCIICode_Return			0x11
@@ -39,6 +39,10 @@
 .def VID_LastColumn		  31		; = VIDEO_NB_COLUMNS - 1
 .def VID_LastLine		  11		; = VIDEO_NB_LINES - 1
 .def VIDEO_CHARSET_End	  0x0280	; = VIDEO_MEM_End + 128*2
+.def VID_FontSize		  0x0100
+.def VID_PaletteSize	  16
+
+.def VID_TotalVideoSize	  0x0290	; Video buffer + Font + Palette
 
 ;-----------------------------------------------------------------------------------
 
@@ -103,9 +107,11 @@
 :SYS_GetTimeInMilliseconds		dat GetTimeInMilliseconds
 :SYS_Sleep						dat Sleep
 :SYS_FinishLoop					dat FinishLoop	
-:SYS_BlockIfRunningInBackground dat DEQOS_BlockIfNotOnMyConsole						
+:SYS_BlockIfRunningInBackground dat DEQOS_BlockIfNotOnMyConsole	
+:SYS_GetPaletteBuffer			dat GetPaletteBuffer
+:SYS_RestoreDefaultPalette		dat DEQOS_RestorePalette
  
-.assert_address 48 ; verifies the current address
+.assert_address 50 ; verifies the current address
 
 :GetDisplayBuffer
 	SET Z, [DisplayBuffer]
@@ -115,8 +121,13 @@
 	SET Z, [FontBuffer]
 	SET PC, POP
 	
-:DisplayBuffer	dat 0x7000
-:FontBuffer		dat 0x7180
+:GetPaletteBuffer
+	SET Z, [PaletteBuffer]
+	SET PC, POP
+	
+:DisplayBuffer	dat 0xFB70
+:FontBuffer		dat 0xFCF0
+:PaletteBuffer	dat 0xFDF0
 
 
 ;===================================
