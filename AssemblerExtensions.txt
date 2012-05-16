@@ -35,5 +35,11 @@ DCPUStation's assembler has a few extra commands
 	.no_relocation_table : Assembler won't output any relocation table for that program...
 	this should only be used for OS code, or code that you know will start at 0
 	
-
+#7
+	.incbin "file" : Includes the given file as data
+	
+#8 
+	.strip_start / .strip_end
+	will strip the code from executable when not actually used. Useful when including big libraries
+	(work in progress, directives are ignored so far)
 	
