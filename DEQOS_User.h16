@@ -74,4 +74,6 @@
 
 .def SYS_GetPaletteBuffer		0x0030
 .def SYS_RestoreDefaultPalette	0x0031
+.def SYS_GetBorderColor			0x0032
+.def SYS_SetBorderColor			0x0033
 

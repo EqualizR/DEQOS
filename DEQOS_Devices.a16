@@ -109,9 +109,9 @@
 	SET A, NELEM1802_MEM_MAP_PALETTE
 	SET B, [PaletteBuffer]
 	HWI [LEM1802_ID]
-	
+
 	SET A, NELEM1802_MEM_SET_BORDER_COLOR
-	SET B, 1
+	SET B, 0
 	HWI [LEM1802_ID]
 	
 	SET PC, ResumeDeviceEnum
@@ -296,3 +296,14 @@
 	
 	SET EX, POP
 	RFI A
+
+:SendBorderColorToLEM
+	SET PUSH, A
+	SET PUSH, B
+	SET A, NELEM1802_MEM_SET_BORDER_COLOR
+	SET B, [BorderColor]
+	IFE [CurrTaskConsole], [CurrConsole]
+		HWI [LEM1802_ID]
+	SET B, POP
+	SET A, POP
+	SET PC, POP

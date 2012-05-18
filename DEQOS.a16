@@ -9,11 +9,8 @@
 .def VIDEO_NB_LINES				12
 .def SIGN_BIT					0x8000
 
-.def KEYBOARD_BUFFER			0xF960
-.def KEYBOARD_BUFFER_END		0xF970
+.include "DEQOS_Memlayout.h16"
 
-
-.def STACK_END					0xfE00
 
 .def ASCIICode_Backspace		0x10
 .def ASCIICode_Return			0x11
@@ -110,9 +107,19 @@
 :SYS_BlockIfRunningInBackground dat DEQOS_BlockIfNotOnMyConsole	
 :SYS_GetPaletteBuffer			dat GetPaletteBuffer
 :SYS_RestoreDefaultPalette		dat DEQOS_RestorePalette
+:SYS_GetBorderColor				dat GetBorderColor
+:SYS_SetBorderColor				dat SetBorderColor
  
-.assert_address 50 ; verifies the current address
+.assert_address 52 ; verifies the current address
 
+:GetBorderColor
+	SET Z, [BorderColor]
+	SET PC, POP
+	
+:SetBorderColor
+	SET [BorderColor],A
+	SET PC, SendBorderColorToLEM
+	
 :GetDisplayBuffer
 	SET Z, [DisplayBuffer]
 	SET PC, POP
@@ -124,11 +131,11 @@
 :GetPaletteBuffer
 	SET Z, [PaletteBuffer]
 	SET PC, POP
-	
-:DisplayBuffer	dat 0xFB70
-:FontBuffer		dat 0xFCF0
-:PaletteBuffer	dat 0xFDF0
 
+:BorderColor	dat ML_SystemBorderColor	
+:DisplayBuffer	dat ML_SystemDisplayBuffer	
+:FontBuffer		dat ML_FontBuffer			
+:PaletteBuffer	dat ML_SystemPaletteBuffer	
 
 ;===================================
 ;Preinit code :
@@ -143,6 +150,8 @@
   ; initializing the disk drive mutex
   SET [ZFAT_Mutex],   1
   SET [ZFAT_Mutex_ListCount], 0
+  
+  SET [BorderColor], 0
   
   ; Initializes all devices..
   JSR DEV_InitDevices
@@ -205,6 +214,7 @@
 .include "DEQOS_ZFat.a16"
 .include "DEQOS_Task.a16"
 .include "DEQOS_Utils.a16"
+
 
 ; MUST BE AT THE VERY END OF THE OS CODE
 ; This marks the start of the Heap

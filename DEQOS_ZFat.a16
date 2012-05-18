@@ -25,21 +25,6 @@
 ; returns Z = 0 (ok), 1 (not ok)
 ;===================================
 :ZFAT_LoadSector
-
-;:ZF_WaitDiskReady
-;	IFE [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Idle		SET PC,	ZF_StartLoading
-;	IFE [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Error		SET PC,	ZF_StartLoading
-;	SET PC,	ZF_WaitDiskReady
-	
-;:ZF_StartLoading
-;	SET [ZFAT_DISK_LOAD_COMMAND_WORD], A
-;	SET [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Load_Request
-	
-;:ZF_WaitLoadingDone
-;	IFE [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Idle	SET PC, ZF_LoadSectorDone
-;	IFE [ZFAT_DISK_LOAD_STATUS],ZFAT_eSTATUS_Error	SET PC, ZF_LoadSectorDone
-;	SET PC,	ZF_WaitLoadingDone
-
 		SET PUSH, A
 		SET PUSH, B
 		SET PUSH, C
@@ -62,9 +47,8 @@
 	
 	SET PC, POP
 	
-:ZFAT_bFATIsInMem
-	dat 0
-	
+:ZFAT_bFATIsInMem	dat 0
+
 ;===================================
 ; Loads the FAT
 ;===================================

@@ -1,0 +1,15 @@
+
+;===================================
+;========= MEMORY LAYOUT ==========
+
+
+; End of memory layout
+
+.def KEYBOARD_BUFFER			0xF95E ; -> f96E
+.def KEYBOARD_BUFFER_END		0xF96E ; -> f96F
+; sector buffer					0xf96F ; -> FB6F
+.def ML_SystemBorderColor		0xFB6F ; -> FB70
+.def ML_SystemDisplayBuffer		0xFB70 ; -> FCF0
+.def ML_FontBuffer				0xFCF0 ; -> FDF0
+.def ML_SystemPaletteBuffer		0xFDF0 ; -> FDE0
+.def STACK_END					0xFE00 ; -> FFFF
